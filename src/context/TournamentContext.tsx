@@ -145,7 +145,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // ADMIN OPERATIONS
   const adminCreateTournament = (data: Omit<Tournament, 'id' | 'enrolledCount'>) => {
     if (!isAdmin) {
-      alert('Unauthorized: Only administrators can create tournaments.');
+      console.warn('Unauthorized: Only administrators can create tournaments.');
       return;
     }
 

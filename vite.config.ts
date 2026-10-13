@@ -87,7 +87,7 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': import.meta.dirname ? path.resolve(import.meta.dirname, '.') : path.resolve(process.cwd(), '.'),
       },
     },
     server: {

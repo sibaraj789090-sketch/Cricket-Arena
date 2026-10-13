@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
-import { User, Shield, Trophy, Users, Award, LogOut, Key, CheckCircle, Database, BookOpen, Coins, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import { Shield, Users, LogOut, BookOpen, Coins, ArrowDownToLine, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTournament } from '../../context/TournamentContext';
 import { useWallet } from '../../context/WalletContext';
-import { Tournament, VirtualTeam } from '../../types';
+import { Tournament } from '../../types';
 
 interface UserProfileViewProps {
   onOpenCreateTeam: (tournament: Tournament) => void;
   onOpenLeaderboard: (tournament: Tournament) => void;
-  onOpenSetupGuide: () => void;
   onOpenRules: () => void;
   onOpenAdmin: () => void;
   onOpenWallet: () => void;
@@ -17,12 +16,11 @@ interface UserProfileViewProps {
 export const UserProfileView: React.FC<UserProfileViewProps> = ({
   onOpenCreateTeam,
   onOpenLeaderboard,
-  onOpenSetupGuide,
   onOpenRules,
   onOpenAdmin,
   onOpenWallet,
 }) => {
-  const { user, isAdmin, loginAsGuest, loginAsAdmin, loginWithEmail, signUpWithEmail, logout } = useAuth();
+  const { user, isAdmin, loginWithEmail, signUpWithEmail, logout, logoutAdmin } = useAuth();
   const { tournaments, virtualTeams, joinedTournamentIds } = useTournament();
   const { wallet, settings } = useWallet();
 
@@ -60,12 +58,18 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
           <div className="flex items-center gap-3">
             <div className="relative">
               <img
-                src={user?.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80'}
+                src={
+                  user?.avatarUrl ||
+                  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80'
+                }
                 alt={user?.name}
                 className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-500/50 shadow-md"
               />
               {isAdmin && (
-                <span className="absolute -bottom-1 -right-1 bg-amber-500 text-slate-950 p-1 rounded-full shadow" title="Admin Role">
+                <span
+                  className="absolute -bottom-1 -right-1 bg-amber-500 text-slate-950 p-1 rounded-full shadow"
+                  title="Admin Role"
+                >
                   <Shield className="w-3 h-3 stroke-[3]" />
                 </span>
               )}
@@ -74,10 +78,14 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-white">{user?.name}</h2>
-                <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                  isAdmin ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400'
-                }`}>
-                  {user?.role}
+                <span
+                  className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                    isAdmin
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'bg-emerald-500/20 text-emerald-400'
+                  }`}
+                >
+                  {isAdmin ? 'ADMINISTRATOR' : user?.role || 'PLAYER'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">{user?.email}</p>
@@ -119,7 +127,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
         </div>
       </div>
 
-      {/* Coins Wallet & Top-Up Card */}
+      {/* Coins Wallet Card */}
       <div className="bg-gradient-to-r from-[#0c1a36] via-[#0f2247] to-[#0c1a36] rounded-2xl border border-blue-900/60 p-4 shadow-xl flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
@@ -149,7 +157,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
 
         <button
           onClick={onOpenWallet}
-          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-md flex items-center gap-1.5 active:scale-95"
+          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-md flex items-center gap-1.5 active:scale-95 cursor-pointer"
         >
           <ArrowDownToLine className="w-3.5 h-3.5" />
           <span>Wallet</span>
@@ -161,13 +169,13 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
         <div className="flex gap-2">
           <button
             onClick={() => setAuthMode('login')}
-            className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition"
+            className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition cursor-pointer"
           >
             Sign In with Supabase
           </button>
           <button
             onClick={() => setAuthMode('signup')}
-            className="flex-1 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition"
+            className="flex-1 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition cursor-pointer"
           >
             Register Free Account
           </button>
@@ -180,7 +188,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
             </h3>
             <button
               onClick={() => setAuthMode('view')}
-              className="text-xs text-slate-400 hover:text-white"
+              className="text-xs text-slate-400 hover:text-white cursor-pointer"
             >
               Cancel
             </button>
@@ -227,7 +235,7 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 font-bold text-slate-950 text-xs rounded-xl transition shadow"
+              className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 font-bold text-slate-950 text-xs rounded-xl transition shadow cursor-pointer"
             >
               {authMode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
@@ -235,46 +243,57 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
         </div>
       )}
 
-      {/* Quick Navigation Cards */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <button
-          onClick={onOpenSetupGuide}
-          className="p-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-left transition flex items-start gap-2.5"
-        >
-          <Database className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-bold text-white">डेटाबेस सेटअप</p>
-            <p className="text-[10px] text-slate-400">Supabase SQL Guide in Hindi</p>
-          </div>
-        </button>
-
+      {/* Rules & Policies Link */}
+      <div className="text-xs">
         <button
           onClick={onOpenRules}
-          className="p-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-left transition flex items-start gap-2.5"
+          className="w-full p-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-left transition flex items-center justify-between cursor-pointer"
         >
-          <BookOpen className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-bold text-white">Rules &amp; Policies</p>
-            <p className="text-[10px] text-slate-400">Zero Cash &amp; Fair Play</p>
+          <div className="flex items-center gap-2.5">
+            <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div>
+              <p className="font-bold text-white">Rules, Policies &amp; Fair Play</p>
+              <p className="text-[10px] text-slate-400">Zero Betting • Skill Gaming • Cricket &amp; Ludo Rules</p>
+            </div>
           </div>
+          <span className="text-[10px] text-slate-400 font-medium">View &rarr;</span>
         </button>
       </div>
 
-      {/* Admin Portal Shortcut (if Admin) */}
-      {isAdmin && (
-        <div className="bg-amber-950/30 border border-amber-500/40 p-3.5 rounded-2xl flex items-center justify-between">
+      {/* Administrator Status / Portal Access */}
+      {isAdmin ? (
+        <div className="bg-gradient-to-r from-amber-950/40 via-amber-900/20 to-slate-900 border border-amber-500/40 p-3.5 rounded-2xl flex items-center justify-between">
           <div className="flex items-center gap-2.5 text-amber-300">
             <Shield className="w-5 h-5 text-amber-400" />
             <div>
               <p className="font-bold text-xs">Administrator Mode Active</p>
-              <p className="text-[11px] text-slate-300">Manage matches, players, scores, and points rules.</p>
+              <p className="text-[11px] text-slate-300">Authorized manager controls unlocked.</p>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenAdmin}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs transition cursor-pointer"
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => logoutAdmin()}
+              className="bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-300 font-semibold px-2.5 py-1.5 rounded-xl text-xs border border-slate-700 transition cursor-pointer"
+              title="Log Out Administrator"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="pt-2 text-center">
           <button
             onClick={onOpenAdmin}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs transition"
+            className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-300 text-[11px] font-medium transition cursor-pointer px-3 py-1.5 rounded-lg hover:bg-slate-900"
           >
-            Open Dashboard
+            <Lock className="w-3 h-3" />
+            <span>Administrator Portal Access</span>
           </button>
         </div>
       )}
@@ -317,14 +336,14 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
                       {tour.status !== 'completed' && (
                         <button
                           onClick={() => onOpenCreateTeam(tour)}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 transition"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 transition cursor-pointer"
                         >
                           Edit
                         </button>
                       )}
                       <button
                         onClick={() => onOpenLeaderboard(tour)}
-                        className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition"
+                        className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition cursor-pointer"
                       >
                         Rankings
                       </button>

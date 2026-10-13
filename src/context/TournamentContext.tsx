@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { CricketDataStore } from '../lib/storage';
 import { useAuth } from './AuthContext';
+import { adminFetch } from '../lib/adminAuth';
 
 interface TournamentContextType {
   tournaments: Tournament[];
@@ -211,15 +212,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       details: notes || `Scores updated for ${Object.keys(playerScores).length} players. Leaderboard recalculated.`,
     });
 
-    // 3. Optional server sync
+    // 3. Server sync with verified administrator credentials
     try {
-      await fetch('/api/admin/scores', {
+      await adminFetch('/api/admin/scores', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': 'admin',
-          'x-admin-key': 'cricket-arena-master-2026',
-        },
         body: JSON.stringify({
           tournamentId,
           playerScores,

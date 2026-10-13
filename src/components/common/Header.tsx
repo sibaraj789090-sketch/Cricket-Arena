@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
-import { ShieldCheck, Download, Database, UserCheck, Wifi, WifiOff, Coins } from 'lucide-react';
+import React from 'react';
+import { ShieldCheck, Download, UserCheck, Wifi, WifiOff, Coins } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useWallet } from '../../context/WalletContext';
 
 interface HeaderProps {
-  onOpenSetupGuide: () => void;
   onOpenRules: () => void;
   onOpenAdmin: () => void;
   onOpenWallet: () => void;
@@ -15,33 +14,16 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  onOpenSetupGuide,
   onOpenRules,
   onOpenAdmin,
   onOpenWallet,
   activeGameMode = 'cricket',
   onToggleGameMode,
 }) => {
-  const { user, isAdmin, loginAsAdmin, logout } = useAuth();
+  const { isAdmin } = useAuth();
   const { wallet, settings } = useWallet();
   const { isInstallable, install } = usePWAInstall();
   const isOnline = useOnlineStatus();
-  const [showAdminPrompt, setShowAdminPrompt] = useState(false);
-  const [adminPasscode, setAdminPasscode] = useState('');
-  const [adminError, setAdminError] = useState('');
-
-  const handleAdminLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const success = loginAsAdmin(adminPasscode);
-    if (success) {
-      setShowAdminPrompt(false);
-      setAdminPasscode('');
-      setAdminError('');
-      onOpenAdmin();
-    } else {
-      setAdminError('Invalid passcode! Hint: arena2026 or admin');
-    }
-  };
 
   return (
     <>
@@ -134,32 +116,14 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Supabase Hindi Setup Guide */}
-            <button
-              onClick={onOpenSetupGuide}
-              className="flex items-center gap-1 text-slate-300 hover:text-emerald-300 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 px-2 py-1 rounded-lg text-xs font-medium transition"
-              title="Database & Hindi Setup Guide"
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden md:inline">SQL / सेटअप</span>
-            </button>
-
-            {/* Admin Portal Toggle */}
-            {isAdmin ? (
+            {/* Authenticated Admin Portal Button (Only visible after verified admin authentication) */}
+            {isAdmin && (
               <button
                 onClick={onOpenAdmin}
                 className="flex items-center gap-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-1 rounded-lg text-xs font-bold transition hover:bg-amber-500/30"
               >
                 <UserCheck className="w-3.5 h-3.5 text-amber-400" />
                 <span>Admin</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowAdminPrompt(true)}
-                className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded border border-slate-800 hover:border-slate-700 transition"
-                title="Admin Login"
-              >
-                Admin
               </button>
             )}
           </div>
@@ -192,52 +156,6 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Admin Quick Unlock Modal */}
-      {showAdminPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-[#0f172a] border border-slate-700/80 rounded-2xl p-5 max-w-sm w-full shadow-2xl text-slate-100">
-            <div className="flex items-center gap-2 mb-2 text-amber-400 font-bold">
-              <UserCheck className="w-5 h-5" />
-              <h3 className="text-base">Admin Dashboard Login</h3>
-            </div>
-            <p className="text-xs text-slate-300 mb-4">
-              Enter Administrator Passcode to manage tournaments, update match player scores, or adjust points rules.
-            </p>
-            <form onSubmit={handleAdminLogin} className="space-y-3">
-              <div>
-                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                  Passcode (Default: arena2026 or admin)
-                </label>
-                <input
-                  type="password"
-                  value={adminPasscode}
-                  onChange={(e) => setAdminPasscode(e.target.value)}
-                  placeholder="Enter passcode"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-                  autoFocus
-                />
-              </div>
-              {adminError && <p className="text-xs text-rose-400">{adminError}</p>}
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAdminPrompt(false)}
-                  className="flex-1 py-2 text-xs font-semibold rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 text-xs font-bold rounded-xl bg-amber-500 text-slate-950 hover:bg-amber-400 transition"
-                >
-                  Unlock Admin
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </>
   );
 };

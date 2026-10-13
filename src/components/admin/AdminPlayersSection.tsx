@@ -29,6 +29,9 @@ import { WalletDataStore } from '../../lib/walletStorage';
 import { CricketDataStore } from '../../lib/storage';
 import { useAuth } from '../../context/AuthContext';
 import { UserWallet, WalletTransaction } from '../../types/wallet';
+import { adminFetch } from '../../lib/adminAuth';
+
+const fetch = adminFetch;
 
 export const AdminPlayersSection: React.FC = () => {
   const { user } = useAuth();

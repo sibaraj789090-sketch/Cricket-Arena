@@ -19,6 +19,8 @@ import {
   FileText,
   UserCheck,
   Bot,
+  Database,
+  LogOut,
 } from 'lucide-react';
 import { AdminWalletSection } from './AdminWalletSection';
 import { AdminLudoTablesSection } from './AdminLudoTablesSection';
@@ -27,6 +29,7 @@ import { AdminPlayersSection } from './AdminPlayersSection';
 import { AdminBansSection } from './AdminBansSection';
 import { AdminActiveMatchesSection } from './AdminActiveMatchesSection';
 import { AdminBotsSection } from './AdminBotsSection';
+import { AdminDatabaseSetupSection } from './AdminDatabaseSetupSection';
 import { AdminDataStore } from '../../lib/adminDataStore';
 import { useAuth } from '../../context/AuthContext';
 import { useTournament } from '../../context/TournamentContext';
@@ -45,8 +48,12 @@ import { calculatePlayerScore } from '../../lib/pointsCalculator';
 import { LudoDataStore } from '../../lib/ludoStorage';
 import { CricketDataStore } from '../../lib/storage';
 
-export const AdminDashboard: React.FC = () => {
-  const { user, isAdmin } = useAuth();
+interface AdminDashboardProps {
+  onExitAdmin?: () => void;
+}
+
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin }) => {
+  const { user, isAdmin, logoutAdmin } = useAuth();
   const {
     tournaments,
     cricketTeams,
@@ -77,6 +84,7 @@ export const AdminDashboard: React.FC = () => {
     | 'points'
     | 'audit'
     | 'participants'
+    | 'database'
   >('ludo-tables');
 
   // Dynamic Badges for Admin Tabs
@@ -317,6 +325,20 @@ export const AdminDashboard: React.FC = () => {
               Manage tournaments, update player stats, recalculate fantasy leaderboards, and audit logs.
             </p>
           </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                await logoutAdmin();
+                if (onExitAdmin) onExitAdmin();
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-rose-950/70 border border-slate-700/80 hover:border-rose-500/50 text-slate-200 hover:text-rose-300 font-bold text-xs transition cursor-pointer shadow"
+              title="Sign Out from Administrator Panel"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-400" />
+              <span>Sign Out</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -337,6 +359,7 @@ export const AdminDashboard: React.FC = () => {
           { id: 'points', label: 'Points Rules', icon: Settings },
           { id: 'audit', label: 'Audit Logs', icon: History },
           { id: 'participants', label: 'Users & Entries', icon: Users },
+          { id: 'database', label: '🗄️ Database & SQL Setup', icon: Database },
         ].map((tab) => {
           const Icon = tab.icon;
           return (
@@ -1113,6 +1136,11 @@ export const AdminDashboard: React.FC = () => {
             })}
           </div>
         </div>
+      )}
+
+      {/* 7. DATABASE & SQL SETUP TAB */}
+      {adminTab === 'database' && (
+        <AdminDatabaseSetupSection />
       )}
     </div>
   );

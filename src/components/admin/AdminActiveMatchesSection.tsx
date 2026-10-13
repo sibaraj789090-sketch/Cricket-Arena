@@ -23,6 +23,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { LudoCashMatch, LudoOnlinePlayer } from '../../types/ludoCash';
+import { adminFetch } from '../../lib/adminAuth';
+
+const fetch = adminFetch;
 
 interface ActiveMatchDisplay extends LudoCashMatch {
   elapsedSeconds?: number;

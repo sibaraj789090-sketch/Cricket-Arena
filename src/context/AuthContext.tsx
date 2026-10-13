@@ -1,14 +1,21 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile } from '../types';
-import { DEMO_USER_PROFILE, DEMO_ADMIN_PROFILE } from '../lib/initialData';
+import { DEMO_USER_PROFILE } from '../lib/initialData';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  setAdminSession,
+  clearAdminSession,
+  verifyAdminSession,
+  getAdminHeaders,
+} from '../lib/adminAuth';
 
 interface AuthContextType {
   user: UserProfile | null;
   isAdmin: boolean;
   isLoading: boolean;
   loginAsGuest: () => void;
-  loginAsAdmin: (passcode?: string) => boolean;
+  loginAdmin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logoutAdmin: () => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -30,13 +37,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Sync with Supabase Auth if configured
+  // Validate admin token on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function checkSession() {
+      const result = await verifyAdminSession();
+      if (isMounted) {
+        setIsAdmin(result.authenticated);
+        setIsLoading(false);
+      }
+    }
+    checkSession();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Sync with Supabase Auth if configured (for normal players)
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured) return;
 
-    // Check existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         syncSupabaseProfile(session.user);
@@ -68,7 +91,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: sbUser.email || 'user@cricketarena.app',
         name: profile?.name || sbUser.user_metadata?.name || 'Cricket Fan',
         role: profile?.role === 'admin' ? 'admin' : 'user',
-        avatarUrl: profile?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
+        avatarUrl:
+          profile?.avatar_url ||
+          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
         joinedTournamentsCount: 2,
         totalFantasyPoints: 450,
         createdTeamsCount: 2,
@@ -96,15 +121,112 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveUserSession(DEMO_USER_PROFILE);
   };
 
-  const loginAsAdmin = (passcode: string = 'arena2026') => {
-    if (passcode === 'arena2026' || passcode === 'admin') {
-      saveUserSession(DEMO_ADMIN_PROFILE);
-      return true;
+  // Secure Administrator Authentication
+  const loginAdmin = async (
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    try {
+      let supabaseToken: string | undefined;
+
+      // If Supabase is configured, authenticate with Supabase Auth first
+      if (isSupabaseConfigured && supabase) {
+        const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (sbError) {
+          setIsLoading(false);
+          return { success: false, error: sbError.message };
+        }
+
+        if (sbData?.session?.access_token) {
+          supabaseToken = sbData.session.access_token;
+        }
+      }
+
+      // Authoritative server-side verification: enforces single authorized admin email
+      const verifyRes = await fetch('/api/admin/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          supabaseToken,
+        }),
+      });
+
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.success) {
+        // If Supabase session was opened for an unauthorized email, sign out immediately
+        if (isSupabaseConfigured && supabase) {
+          await supabase.auth.signOut();
+        }
+        setIsLoading(false);
+        return {
+          success: false,
+          error:
+            verifyData.error ||
+            'Access Denied: Invalid credentials or account is not authorized as an administrator.',
+        };
+      }
+
+      // Store server admin session
+      setAdminSession(verifyData.token, email.toLowerCase());
+      setIsAdmin(true);
+
+      const adminProfile: UserProfile = {
+        id: 'admin-master',
+        email: email.toLowerCase(),
+        name: 'Administrator',
+        role: 'admin',
+        avatarUrl:
+          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        joinedTournamentsCount: 14,
+        totalFantasyPoints: 4890,
+        createdTeamsCount: 14,
+      };
+
+      saveUserSession(adminProfile);
+      setIsLoading(false);
+      return { success: true };
+    } catch (err: any) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: err?.message || 'Administrator authentication request failed.',
+      };
     }
-    return false;
   };
 
-  const loginWithEmail = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  // Secure Administrator Logout
+  const logoutAdmin = async () => {
+    try {
+      await fetch('/api/admin/auth/logout', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+      });
+    } catch {}
+
+    clearAdminSession();
+    setIsAdmin(false);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch {}
+    }
+
+    saveUserSession(DEMO_USER_PROFILE);
+  };
+
+  // Normal Player Login (Never grants admin role)
+  const loginWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     try {
       if (isSupabaseConfigured && supabase) {
@@ -120,22 +242,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true };
       }
 
-      // Offline / Local simulation
-      if (email.toLowerCase().includes('admin')) {
-        saveUserSession(DEMO_ADMIN_PROFILE);
-      } else {
-        const customUser: UserProfile = {
-          id: `usr-${Date.now()}`,
-          email,
-          name: email.split('@')[0].toUpperCase(),
-          role: 'user',
-          avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
-          joinedTournamentsCount: 1,
-          totalFantasyPoints: 120,
-          createdTeamsCount: 1,
-        };
-        saveUserSession(customUser);
-      }
+      // Standard user login (Always role: 'user')
+      const customUser: UserProfile = {
+        id: `usr-${Date.now()}`,
+        email,
+        name: email.split('@')[0].toUpperCase(),
+        role: 'user',
+        avatarUrl:
+          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
+        joinedTournamentsCount: 1,
+        totalFantasyPoints: 120,
+        createdTeamsCount: 1,
+      };
+      saveUserSession(customUser);
       setIsLoading(false);
       return { success: true };
     } catch (err: any) {
@@ -144,6 +263,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Normal Player Registration (Always role: 'user')
   const signUpWithEmail = async (
     email: string,
     password: string,
@@ -156,7 +276,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email,
           password,
           options: {
-            data: { name },
+            data: { name, role: 'user' },
           },
         });
         if (error) {
@@ -170,13 +290,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true };
       }
 
-      // Local / Offline fallback
+      // Local fallback
       const newUser: UserProfile = {
         id: `usr-${Date.now()}`,
         email,
         name: name || email.split('@')[0],
         role: 'user',
-        avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
+        avatarUrl:
+          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
         joinedTournamentsCount: 0,
         totalFantasyPoints: 0,
         createdTeamsCount: 0,
@@ -190,7 +311,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // General Logout
   const logout = async () => {
+    if (isAdmin) {
+      await logoutAdmin();
+      return;
+    }
+
     if (isSupabaseConfigured && supabase) {
       await supabase.auth.signOut();
     }
@@ -207,10 +334,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user,
-        isAdmin: user?.role === 'admin',
+        isAdmin,
         isLoading,
         loginAsGuest,
-        loginAsAdmin,
+        loginAdmin,
+        logoutAdmin,
         loginWithEmail,
         signUpWithEmail,
         logout,

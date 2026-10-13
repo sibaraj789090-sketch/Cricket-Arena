@@ -33,7 +33,7 @@ import { CreateTeamModal } from './components/team/CreateTeamModal';
 import { LeaderboardView } from './components/leaderboard/LeaderboardView';
 import { UserProfileView } from './components/profile/UserProfileView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
-import { HindiSetupGuideModal } from './components/setup/HindiSetupGuideModal';
+import { AdminLoginView } from './components/admin/AdminLoginView';
 import { RulesAndPolicies } from './components/legal/RulesAndPolicies';
 import { LudoCashLobbyView } from './components/ludo/LudoCashLobbyView';
 import { LudoOnlineMatchView } from './components/ludo/LudoOnlineMatchView';
@@ -52,7 +52,6 @@ function CricketArenaApp() {
   const [leaderboardTourId, setLeaderboardTourId] = useState<string>('');
 
   // Modals
-  const [showSetupGuide, setShowSetupGuide] = useState<boolean>(false);
   const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
   const [showWalletModal, setShowWalletModal] = useState<boolean>(false);
   const [rulesDefaultSection, setRulesDefaultSection] = useState<'rules' | 'points' | 'terms' | 'privacy' | 'contact'>('rules');
@@ -98,7 +97,6 @@ function CricketArenaApp() {
     <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
       {/* Top Header */}
       <Header
-        onOpenSetupGuide={() => setShowSetupGuide(true)}
         onOpenRules={() => handleOpenRules('terms')}
         onOpenAdmin={() => setCurrentTab('admin')}
         onOpenWallet={() => setShowWalletModal(true)}
@@ -547,7 +545,6 @@ function CricketArenaApp() {
           <UserProfileView
             onOpenCreateTeam={(t) => setSelectedTournamentForTeam(t)}
             onOpenLeaderboard={handleOpenLeaderboard}
-            onOpenSetupGuide={() => setShowSetupGuide(true)}
             onOpenRules={() => handleOpenRules('terms')}
             onOpenAdmin={() => setCurrentTab('admin')}
             onOpenWallet={() => setShowWalletModal(true)}
@@ -557,7 +554,16 @@ function CricketArenaApp() {
         {/* ========================================================
             TAB 6: ADMIN CONTROL PANEL
             ======================================================== */}
-        {currentTab === 'admin' && <AdminDashboard />}
+        {currentTab === 'admin' && (
+          isAdmin ? (
+            <AdminDashboard onExitAdmin={() => setCurrentTab('home')} />
+          ) : (
+            <AdminLoginView
+              onLoginSuccess={() => setCurrentTab('admin')}
+              onCancel={() => setCurrentTab('home')}
+            />
+          )
+        )}
 
         {/* ========================================================
             TAB 7: LUDO CASH TABLES & MULTIPLAYER MATCH
@@ -616,13 +622,7 @@ function CricketArenaApp() {
         />
       )}
 
-      {/* 3. Hindi Setup Guide Modal */}
-      <HindiSetupGuideModal
-        isOpen={showSetupGuide}
-        onClose={() => setShowSetupGuide(false)}
-      />
-
-      {/* 4. Rules & Policies Modal */}
+      {/* 3. Rules & Policies Modal */}
       <RulesAndPolicies
         isOpen={showRulesModal}
         onClose={() => setShowRulesModal(false)}

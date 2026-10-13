@@ -31,8 +31,12 @@ import {
   botPoolConfig,
   generateStealthPlayer,
 } from './ludoBotEngine';
+import { requireAdminRole } from './adminAuthServer';
 
 export const ludoRouter = express.Router();
+
+// Authoritative protection on all administrative routes
+ludoRouter.use('/admin', requireAdminRole);
 
 // Authoritative In-Memory Game Store
 const cashTables: LudoCashTable[] = generateDefaultCashTables();

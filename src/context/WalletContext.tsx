@@ -10,6 +10,7 @@ import {
 import { WalletDataStore } from '../lib/walletStorage';
 import { useAuth } from './AuthContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { adminFetch } from '../lib/adminAuth';
 
 interface WalletContextType {
   wallet: UserWallet;
@@ -531,12 +532,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Admin Update Settings
   const adminUpdateSettings = async (newSettings: WalletSettings) => {
     try {
-      await fetch('/api/admin/wallet/settings', {
+      await adminFetch('/api/admin/wallet/settings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': 'admin',
-        },
         body: JSON.stringify({
           settings: newSettings,
           adminName: user?.name || 'Official Admin',
@@ -572,12 +569,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Admin Update Packages
   const adminUpdatePackages = async (newPackages: CoinPackage[]) => {
     try {
-      await fetch('/api/admin/wallet/packages', {
+      await adminFetch('/api/admin/wallet/packages', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': 'admin',
-        },
         body: JSON.stringify({
           packages: newPackages,
           adminName: user?.name || 'Official Admin',
@@ -624,12 +617,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       // 1. Server-side verification
       try {
-        await fetch('/api/admin/wallet/adjust', {
+        await adminFetch('/api/admin/wallet/adjust', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-role': 'admin',
-          },
           body: JSON.stringify({
             targetUserId,
             amountDelta,

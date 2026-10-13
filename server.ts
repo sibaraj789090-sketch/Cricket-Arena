@@ -13,6 +13,12 @@ import {
   serverPlayerRestrictions,
   checkUserBanStatus,
 } from './src/server/adminControlServer';
+import {
+  requireAdminRole,
+  handleAdminLogin,
+  handleAdminLogout,
+  handleAdminCheck,
+} from './src/server/adminAuthServer';
 import { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,20 +62,10 @@ const serverAuditLogs: ServerAuditLog[] = [
   },
 ];
 
-// Admin authorization middleware
-function requireAdminRole(req: Request, res: Response, next: NextFunction) {
-  const userRole = req.headers['x-user-role'];
-  const adminSecret = req.headers['x-admin-key'];
-
-  // Accept admin role header or secret token
-  if (userRole === 'admin' || adminSecret === 'cricket-arena-master-2026') {
-    return next();
-  }
-
-  return res.status(403).json({
-    error: 'Access Denied: Only authenticated administrators can alter scores, points rules, or tournament states.',
-  });
-}
+// Admin Authentication Endpoints (Strict single-authorized Gmail enforcement)
+app.post('/api/admin/auth/login', handleAdminLogin);
+app.post('/api/admin/auth/logout', handleAdminLogout);
+app.get('/api/admin/auth/check', handleAdminCheck);
 
 // ==========================================
 // API ROUTES

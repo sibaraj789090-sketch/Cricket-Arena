@@ -18,6 +18,7 @@ import { CashAdditionRequest } from '../../types/adminControl';
 import { AdminDataStore } from '../../lib/adminDataStore';
 import { WalletDataStore } from '../../lib/walletStorage';
 import { useAuth } from '../../context/AuthContext';
+import { adminFetch } from '../../lib/adminAuth';
 
 export const AdminCashRequestsSection: React.FC = () => {
   const { user } = useAuth();
@@ -92,12 +93,8 @@ export const AdminCashRequestsSection: React.FC = () => {
 
         if (result.success) {
           // Sync with server API
-          fetch('/api/admin/cash-requests/action', {
+          adminFetch('/api/admin/cash-requests/action', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-user-role': 'admin',
-            },
             body: JSON.stringify({
               requestId: selectedReq.id,
               action: 'approve',
@@ -128,12 +125,8 @@ export const AdminCashRequestsSection: React.FC = () => {
         });
 
         if (result.success) {
-          fetch('/api/admin/cash-requests/action', {
+          adminFetch('/api/admin/cash-requests/action', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-user-role': 'admin',
-            },
             body: JSON.stringify({
               requestId: selectedReq.id,
               action: 'reject',

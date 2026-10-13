@@ -26,22 +26,13 @@ import {
 } from './ludoBotEngine';
 import { BotStrategy, SimulationOutcome } from '../types/ludoBot';
 
+import { requireAdminRole } from './adminAuthServer';
+
 export const ludoBotRouter = express.Router();
 
 // Strict Admin Authorization Middleware for Bot Management
-function verifyAdminRole(req: Request, res: Response, next: NextFunction) {
-  const userRole = req.headers['x-user-role'];
-  const adminSecret = req.headers['x-admin-key'];
-
-  // Accept admin role header or secret token
-  if (userRole === 'admin' || adminSecret === 'cricket-arena-master-2026') {
-    return next();
-  }
-
-  return res.status(403).json({
-    error: 'Access Denied: Only authenticated administrators can configure or manage Ludo bots.',
-  });
-}
+const verifyAdminRole = requireAdminRole;
+ludoBotRouter.use(requireAdminRole);
 
 // 1. Get Global Bot Pool Config & Summary Statistics
 ludoBotRouter.get('/config', verifyAdminRole, (req: Request, res: Response) => {

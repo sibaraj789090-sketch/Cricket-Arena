@@ -35,6 +35,9 @@ import {
 } from 'lucide-react';
 import { LudoCashTable, LudoAdminConfig } from '../../types/ludoCash';
 import { useAuth } from '../../context/AuthContext';
+import { adminFetch } from '../../lib/adminAuth';
+
+const fetch = adminFetch;
 
 export interface DetailedTablePlayer {
   userId: string;

@@ -20,6 +20,34 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- Index on role for fast permission verification
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 
+-- 1B. APP_USERS TABLE (Secure No-OTP Gmail & Phone Authentication)
+CREATE TABLE IF NOT EXISTS public.app_users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE,
+  phone TEXT UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user' CHECK (role = 'user'),
+  avatar_url TEXT,
+  joined_tournaments_count INT DEFAULT 0,
+  total_fantasy_points INT DEFAULT 0,
+  created_teams_count INT DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_users_email ON public.app_users(email);
+CREATE INDEX IF NOT EXISTS idx_app_users_phone ON public.app_users(phone);
+CREATE INDEX IF NOT EXISTS idx_app_users_role ON public.app_users(role);
+
+ALTER TABLE public.app_users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read app users profile"
+  ON public.app_users
+  FOR SELECT
+  TO anon, authenticated
+  USING (true);
+
 -- 2. CRICKET TEAMS
 CREATE TABLE IF NOT EXISTS public.cricket_teams (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

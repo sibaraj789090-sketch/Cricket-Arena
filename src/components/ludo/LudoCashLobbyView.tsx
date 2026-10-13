@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useWallet } from '../../context/WalletContext';
 import { useAuth } from '../../context/AuthContext';
-import { LudoCashTable, LudoCashMatchRecord } from '../../types/ludoCash';
+import { LudoCashTable, LudoCashMatchRecord, generateDefaultCashTables } from '../../types/ludoCash';
 import {
   join_table,
   verifyUserCashBalance,
@@ -41,7 +41,7 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
   const { wallet, refreshWallet, reserveGameEntry, refundGameEntry } = useWallet();
   const { user } = useAuth();
 
-  const [tables, setTables] = useState<LudoCashTable[]>([]);
+  const [tables, setTables] = useState<LudoCashTable[]>(() => generateDefaultCashTables());
   const [selectedModeFilter, setSelectedModeFilter] = useState<'all' | '2' | '4'>('all');
   const [activeTab, setActiveTab] = useState<'tables' | 'history' | 'winners'>('tables');
   const [matchHistory, setMatchHistory] = useState<LudoCashMatchRecord[]>([]);
@@ -66,9 +66,14 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
     try {
       const res = await fetch('/api/ludo/tables');
       if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.tables)) {
-          setTables(data.tables);
+        const text = await res.text();
+        if (text) {
+          try {
+            const data = JSON.parse(text);
+            if (Array.isArray(data.tables) && data.tables.length > 0) {
+              setTables(data.tables);
+            }
+          } catch {}
         }
       }
     } catch (err) {
@@ -82,9 +87,14 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
     try {
       const res = await fetch(`/api/ludo/history/${user.id}`);
       if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.records)) {
-          setMatchHistory(data.records);
+        const text = await res.text();
+        if (text) {
+          try {
+            const data = JSON.parse(text);
+            if (Array.isArray(data.records)) {
+              setMatchHistory(data.records);
+            }
+          } catch {}
         }
       }
     } catch (err) {
@@ -110,8 +120,10 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
           `/api/ludo/queue/status?tableId=${activeQueueTable.id}&userId=${user.id}`
         );
         if (res.ok) {
-          const data = await res.json();
-          if (!isMounted) return;
+          const text = await res.text();
+          let data: any = null;
+          try { data = text ? JSON.parse(text) : null; } catch {}
+          if (!data || !isMounted) return;
 
           if (data.inMatch && data.matchId) {
             // Match is ready!
@@ -207,9 +219,13 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
         }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : null;
+      } catch {}
 
-      if (!res.ok || !data.success) {
+      if (!res.ok || !data || !data.success) {
         // Refund on server failure using authoritative server action
         await refund_table_entry({
           userId: user.id,
@@ -219,7 +235,7 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
         });
         await refreshWallet();
         setIsJoining(false);
-        setQueueError(data.error || 'Failed to join table queue.');
+        setQueueError(data?.error || 'Failed to join table queue.');
         setTableToConfirm(null);
         return;
       }

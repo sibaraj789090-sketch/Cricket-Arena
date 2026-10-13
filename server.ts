@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { ludoRouter } from './src/server/ludoMatchServer';
 import { ludoBotRouter } from './src/server/ludoBotRouter';
+import { userAuthRouter } from './src/server/userAuthServer';
 import {
   serverCashRequests,
   serverPlayerRestrictions,
@@ -29,6 +30,9 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(express.json());
+
+// Mount User Sign Up and Login Router (No OTP, Gmail & Phone Auth)
+app.use('/api/auth', userAuthRouter);
 
 // Mount Authoritative Online Ludo Multiplayer Router
 app.use('/api/ludo', ludoRouter);

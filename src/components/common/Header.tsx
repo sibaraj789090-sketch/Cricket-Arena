@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Download, UserCheck, Wifi, WifiOff, Coins } from 'lucide-react';
+import { ShieldCheck, Download, UserCheck, Wifi, WifiOff, Coins, LogIn, User } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
@@ -9,6 +9,8 @@ interface HeaderProps {
   onOpenRules: () => void;
   onOpenAdmin: () => void;
   onOpenWallet: () => void;
+  onOpenAuth?: () => void;
+  onOpenProfile?: () => void;
   activeGameMode?: 'cricket' | 'ludo';
   onToggleGameMode?: (mode: 'cricket' | 'ludo') => void;
 }
@@ -17,10 +19,12 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenRules,
   onOpenAdmin,
   onOpenWallet,
+  onOpenAuth,
+  onOpenProfile,
   activeGameMode = 'cricket',
   onToggleGameMode,
 }) => {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin, isGuest } = useAuth();
   const { wallet, settings } = useWallet();
   const { isInstallable, install } = usePWAInstall();
   const isOnline = useOnlineStatus();
@@ -114,6 +118,40 @@ export const Header: React.FC<HeaderProps> = ({
                 <Download className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Install</span>
               </button>
+            )}
+
+            {/* User Account / Sign In Quick Action */}
+            {isGuest ? (
+              onOpenAuth && (
+                <button
+                  onClick={onOpenAuth}
+                  className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-2.5 py-1 rounded-xl text-xs transition shadow-sm active:scale-95 cursor-pointer"
+                  title="Sign In or Register (No OTP)"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Sign In</span>
+                </button>
+              )
+            ) : (
+              onOpenProfile && (
+                <button
+                  onClick={onOpenProfile}
+                  className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 hover:border-emerald-500/50 text-white font-bold px-2 py-1 rounded-xl text-xs transition active:scale-95 cursor-pointer"
+                  title={`Signed in as ${user?.name}`}
+                >
+                  <img
+                    src={
+                      user?.avatarUrl ||
+                      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80'
+                    }
+                    alt={user?.name || 'User'}
+                    className="w-4 h-4 rounded-full object-cover border border-emerald-400/50"
+                  />
+                  <span className="hidden sm:inline max-w-[80px] truncate text-[11px]">
+                    {user?.name?.split(' ')[0] || 'Player'}
+                  </span>
+                </button>
+              )
             )}
 
             {/* Authenticated Admin Portal Button (Only visible after verified admin authentication) */}

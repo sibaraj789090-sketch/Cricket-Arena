@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Trophy, Crown, Sparkles, ChevronRight, X, Clock, Users, ArrowUpRight } from 'lucide-react';
-import { RecentLudoWinner } from '../../types/ludoCash';
+import { RecentLudoWinner, INITIAL_RECENT_WINNERS } from '../../types/ludoCash';
 
 interface LudoRecentWinnersMarqueeProps {
   onSelectTable?: (tableId: string) => void;
 }
 
 export const LudoRecentWinnersMarquee: React.FC<LudoRecentWinnersMarqueeProps> = () => {
-  const [winners, setWinners] = useState<RecentLudoWinner[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [winners, setWinners] = useState<RecentLudoWinner[]>(() => INITIAL_RECENT_WINNERS);
+  const [loading, setLoading] = useState<boolean>(false);
   const [showAllModal, setShowAllModal] = useState<boolean>(false);
 
   // Fetch recent winners from backend
@@ -16,15 +16,18 @@ export const LudoRecentWinnersMarquee: React.FC<LudoRecentWinnersMarqueeProps> =
     try {
       const res = await fetch('/api/ludo/recent-winners');
       if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.winners) && data.winners.length > 0) {
-          setWinners(data.winners);
+        const text = await res.text();
+        if (text) {
+          try {
+            const data = JSON.parse(text);
+            if (Array.isArray(data.winners) && data.winners.length > 0) {
+              setWinners(data.winners);
+            }
+          } catch {}
         }
       }
     } catch (err) {
       console.warn('Failed to fetch recent winners:', err);
-    } finally {
-      setLoading(false);
     }
   };
 

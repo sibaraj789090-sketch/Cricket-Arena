@@ -246,15 +246,14 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
   const fetchMatchState = async () => {
     try {
       const res = await fetch(`/api/ludo/match/${matchId}/state`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.match) {
-          setMatch(data.match);
-          setIsLoading(false);
-        }
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setErrorMsg(err.error || 'Match not found');
+      const text = await res.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      if (res.ok && data?.match) {
+        setMatch(data.match);
+        setIsLoading(false);
+      } else if (!res.ok) {
+        setErrorMsg(data?.error || 'Match not found');
         setIsLoading(false);
       }
     } catch (err: any) {

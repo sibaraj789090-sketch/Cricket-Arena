@@ -141,6 +141,7 @@ export interface AuditLog {
 export interface UserProfile {
   id: string;
   email: string;
+  phone?: string;
   name: string;
   role: 'admin' | 'user';
   avatar?: string;

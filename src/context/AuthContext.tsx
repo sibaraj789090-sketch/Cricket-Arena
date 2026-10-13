@@ -10,15 +10,31 @@ import {
   isAuthorizedAdminEmail,
 } from '../lib/adminAuth';
 
+export interface RegisterParams {
+  name: string;
+  email?: string;
+  phone?: string;
+  password: string;
+}
+
+export interface LoginParams {
+  identifier: string;
+  password: string;
+}
+
 interface AuthContextType {
   user: UserProfile | null;
   isAdmin: boolean;
   isLoading: boolean;
+  isGuest: boolean;
   loginAsGuest: () => void;
   loginAdmin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logoutAdmin: () => Promise<void>;
+  registerUser: (params: RegisterParams) => Promise<{ success: boolean; error?: string; user?: UserProfile }>;
+  loginUser: (params: LoginParams) => Promise<{ success: boolean; error?: string; user?: UserProfile }>;
   loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signUpWithEmail: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithPhone: (phone: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signUpWithEmail: (email: string, password: string, name: string, phone?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateProfileName: (name: string) => void;
 }
@@ -256,93 +272,140 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveUserSession(DEMO_USER_PROFILE);
   };
 
-  // Normal Player Login (Never grants admin role)
+  const USER_TOKEN_KEY = 'cricket_arena_user_session_token';
+
+  // Hydrate user session from token or cache
+  useEffect(() => {
+    let isMounted = true;
+    async function restoreUserSession() {
+      if (typeof window === 'undefined') return;
+      const token = localStorage.getItem(USER_TOKEN_KEY);
+      if (!token) return;
+
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'x-user-session-token': token,
+          },
+        });
+
+        if (res.ok) {
+          const text = await res.text();
+          let data: any = null;
+          try { data = text ? JSON.parse(text) : null; } catch {}
+          if (data && data.success && data.user && isMounted) {
+            saveUserSession(data.user);
+          }
+        }
+      } catch (err) {
+        console.warn('[AuthContext] Session restore notice:', err);
+      }
+    }
+    restoreUserSession();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Register with Name, Email (optional if phone provided), Phone (optional if email provided), Password (No OTP)
+  const registerUser = async (params: RegisterParams): Promise<{ success: boolean; error?: string; user?: UserProfile }> => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+
+      const text = await res.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+
+      if (!res.ok || !data || !data.success) {
+        setIsLoading(false);
+        return {
+          success: false,
+          error: data?.error || 'Registration failed. Please check your details and try again.',
+        };
+      }
+
+      if (data.token && typeof window !== 'undefined') {
+        localStorage.setItem(USER_TOKEN_KEY, data.token);
+      }
+
+      saveUserSession(data.user);
+      setIsLoading(false);
+      return { success: true, user: data.user };
+    } catch (err: any) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: err?.message || 'Network error during registration. Please verify your connection.',
+      };
+    }
+  };
+
+  // Login with Gmail or Phone Number + Password (No OTP)
+  const loginUser = async (params: LoginParams): Promise<{ success: boolean; error?: string; user?: UserProfile }> => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+
+      const text = await res.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+
+      if (!res.ok || !data || !data.success) {
+        setIsLoading(false);
+        return {
+          success: false,
+          error: data?.error || 'Invalid credentials. Please verify your details and try again.',
+        };
+      }
+
+      if (data.token && typeof window !== 'undefined') {
+        localStorage.setItem(USER_TOKEN_KEY, data.token);
+      }
+
+      saveUserSession(data.user);
+      setIsLoading(false);
+      return { success: true, user: data.user };
+    } catch (err: any) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: err?.message || 'Network error during sign in. Please verify your connection.',
+      };
+    }
+  };
+
   const loginWithEmail = async (
     email: string,
     password: string
   ): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-          setIsLoading(false);
-          return { success: false, error: error.message };
-        }
-        if (data.user) {
-          await syncSupabaseProfile(data.user);
-        }
-        setIsLoading(false);
-        return { success: true };
-      }
-
-      // Standard user login (Always role: 'user')
-      const customUser: UserProfile = {
-        id: `usr-${Date.now()}`,
-        email,
-        name: email.split('@')[0].toUpperCase(),
-        role: 'user',
-        avatarUrl:
-          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
-        joinedTournamentsCount: 1,
-        totalFantasyPoints: 120,
-        createdTeamsCount: 1,
-      };
-      saveUserSession(customUser);
-      setIsLoading(false);
-      return { success: true };
-    } catch (err: any) {
-      setIsLoading(false);
-      return { success: false, error: err?.message || 'Login failed' };
-    }
+    const res = await loginUser({ identifier: email, password });
+    return { success: res.success, error: res.error };
   };
 
-  // Normal Player Registration (Always role: 'user')
+  const loginWithPhone = async (
+    phone: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const res = await loginUser({ identifier: phone, password });
+    return { success: res.success, error: res.error };
+  };
+
   const signUpWithEmail = async (
     email: string,
     password: string,
-    name: string
+    name: string,
+    phone?: string
   ): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    try {
-      if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { name, role: 'user' },
-          },
-        });
-        if (error) {
-          setIsLoading(false);
-          return { success: false, error: error.message };
-        }
-        if (data.user) {
-          await syncSupabaseProfile(data.user);
-        }
-        setIsLoading(false);
-        return { success: true };
-      }
-
-      // Local fallback
-      const newUser: UserProfile = {
-        id: `usr-${Date.now()}`,
-        email,
-        name: name || email.split('@')[0],
-        role: 'user',
-        avatarUrl:
-          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
-        joinedTournamentsCount: 0,
-        totalFantasyPoints: 0,
-        createdTeamsCount: 0,
-      };
-      saveUserSession(newUser);
-      setIsLoading(false);
-      return { success: true };
-    } catch (err: any) {
-      setIsLoading(false);
-      return { success: false, error: err?.message || 'Sign up failed' };
-    }
+    const res = await registerUser({ name, email, phone, password });
+    return { success: res.success, error: res.error };
   };
 
   // General Logout
@@ -352,9 +415,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    if (isSupabaseConfigured && supabase) {
-      await supabase.auth.signOut();
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem(USER_TOKEN_KEY);
+      if (token) {
+        try {
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'x-user-session-token': token,
+            },
+          });
+        } catch {}
+        localStorage.removeItem(USER_TOKEN_KEY);
+      }
     }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch {}
+    }
+
     saveUserSession(DEMO_USER_PROFILE);
   };
 
@@ -364,16 +446,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveUserSession(updated);
   };
 
+  const isGuest = user?.id === 'user-demo-guest';
+
   return (
     <AuthContext.Provider
       value={{
         user,
         isAdmin,
         isLoading,
+        isGuest,
         loginAsGuest,
         loginAdmin,
         logoutAdmin,
+        registerUser,
+        loginUser,
         loginWithEmail,
+        loginWithPhone,
         signUpWithEmail,
         logout,
         updateProfileName,

@@ -1,9 +1,23 @@
 import React, { useState } from 'react';
-import { Shield, Users, LogOut, BookOpen, Coins, ArrowDownToLine, Lock } from 'lucide-react';
+import {
+  Shield,
+  Users,
+  LogOut,
+  BookOpen,
+  Coins,
+  ArrowDownToLine,
+  Lock,
+  UserCheck,
+  Smartphone,
+  Mail,
+  UserPlus,
+  LogIn,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTournament } from '../../context/TournamentContext';
 import { useWallet } from '../../context/WalletContext';
 import { Tournament } from '../../types';
+import { AuthModal } from '../auth/AuthModal';
 
 interface UserProfileViewProps {
   onOpenCreateTeam: (tournament: Tournament) => void;
@@ -20,34 +34,21 @@ export const UserProfileView: React.FC<UserProfileViewProps> = ({
   onOpenAdmin,
   onOpenWallet,
 }) => {
-  const { user, isAdmin, loginWithEmail, signUpWithEmail, logout, logoutAdmin } = useAuth();
+  const { user, isAdmin, isGuest, logout, logoutAdmin } = useAuth();
   const { tournaments, virtualTeams, joinedTournamentIds } = useTournament();
   const { wallet, settings } = useWallet();
 
-  const [authMode, setAuthMode] = useState<'view' | 'login' | 'signup'>('view');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [authError, setAuthError] = useState('');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login');
 
   const myVirtualTeams = virtualTeams.filter((vt) => vt.userId === user?.id);
   const myTournaments = tournaments.filter((t) => joinedTournamentIds.includes(t.id));
 
   const totalPoints = myVirtualTeams.reduce((sum, vt) => sum + vt.totalPoints, 0);
 
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-
-    if (authMode === 'login') {
-      const res = await loginWithEmail(email, password);
-      if (!res.success) setAuthError(res.error || 'Login failed');
-      else setAuthMode('view');
-    } else if (authMode === 'signup') {
-      const res = await signUpWithEmail(email, password, name);
-      if (!res.success) setAuthError(res.error || 'Signup failed');
-      else setAuthMode('view');
-    }
+  const openAuth = (mode: 'login' | 'signup') => {
+    setAuthModalMode(mode);
+    setShowAuthModal(true);
   };
 
   return (

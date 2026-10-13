@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <script>
+      // Gracefully handle/ignore Vite HMR WebSocket connection events in Cloud Run preview iframe
+      window.addEventListener('error', function(event) {
+        var msg = (event.message || '') + ' ' + (event.error ? event.error.message : '');
+        if (msg.includes('WebSocket') || msg.includes('ws://') || msg.includes('wss://')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return true;
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(event) {
+        var msg = String(event.reason && event.reason.message ? event.reason.message : event.reason || '');
+        if (msg.includes('WebSocket') || msg.includes('ws://') || msg.includes('wss://')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return true;
+        }
+      }, true);
+    </script>
+    <title>Cricket Arena — Online Skill Games • Top-up and Play • Real Cash Games</title>
+    <meta name="description" content="Cricket Arena: India’s trusted skill gaming platform. Play online real cash Ludo tables, join cricket skill tournaments, and experience secure, verified online gaming." />
+    <meta property="og:title" content="Cricket Arena — Online Skill Games • Top-up and Play • Real Cash Games" />
+    <meta property="og:description" content="Cricket Arena: India’s trusted skill gaming platform. Play online real cash Ludo tables, join cricket skill tournaments, and experience secure, verified online gaming." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0a0f1d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CricketArena" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Teko:wght@600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#070b14] text-slate-100 antialiased selection:bg-emerald-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

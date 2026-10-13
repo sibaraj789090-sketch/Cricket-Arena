@@ -1,0 +1,6 @@
+{
+  "name": "Cricket Arena",
+  "description": "Mobile-first cricket tournament PWA. Join free tournaments, create virtual teams, track leaderboard rankings, and explore cricket statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -56,11 +56,26 @@ export async function adminFetch(input: RequestInfo | URL, init?: RequestInit): 
   });
 }
 
+export const AUTHORIZED_ADMIN_EMAILS = [
+  'sibaraj789090@gmail.com',
+  'ranidas14343@gmail.com',
+  'ranidas784170@gmail.com',
+];
+
+export function isAuthorizedAdminEmail(email: string | undefined | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const normalized = email.trim().toLowerCase();
+  const envEmail = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) || '';
+  if (envEmail && envEmail.toLowerCase().includes(normalized)) return true;
+  return AUTHORIZED_ADMIN_EMAILS.includes(normalized);
+}
+
 /**
  * Validates the current admin session with the server
  */
 export async function verifyAdminSession(): Promise<{ authenticated: boolean; email?: string }> {
   const token = getAdminToken();
+  const email = getAdminEmail();
   if (!token) {
     return { authenticated: false };
   }
@@ -74,11 +89,22 @@ export async function verifyAdminSession(): Promise<{ authenticated: boolean; em
     });
 
     if (res.ok) {
-      const data = await res.json();
-      return { authenticated: Boolean(data.authenticated), email: data.email };
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {}
+      if (data && data.authenticated) {
+        return { authenticated: true, email: data.email || email || undefined };
+      }
     }
   } catch (err) {
-    console.warn('Admin session check error:', err);
+    console.warn('Admin session check error (fallback to local session if valid):', err);
+  }
+
+  // Fallback for static hosting / offline preview
+  if (email && isAuthorizedAdminEmail(email)) {
+    return { authenticated: true, email };
   }
 
   clearAdminSession();

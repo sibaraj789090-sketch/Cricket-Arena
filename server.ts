@@ -917,7 +917,14 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+// In standard dev or full-stack production, start the standalone HTTP server.
+// In Vercel serverless environment, the app instance is exported for function routing.
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
+
+export { app };
+export default app;

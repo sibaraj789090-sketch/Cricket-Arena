@@ -2,20 +2,32 @@ import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-// Single Authorized Administrator Gmail Address (strictly enforced on server)
-export function getAuthorizedAdminEmail(): string {
+// Verified Authorized Administrator Gmail Addresses
+const DEFAULT_AUTHORIZED_ADMIN_EMAILS = [
+  'sibaraj789090@gmail.com',
+  'ranidas14343@gmail.com',
+  'ranidas784170@gmail.com',
+];
+
+export function getAuthorizedAdminEmails(): string[] {
   const envEmail = process.env.ADMIN_EMAIL || process.env.AUTHORIZED_ADMIN_EMAIL || '';
   if (envEmail.trim()) {
-    return envEmail.trim().toLowerCase();
+    const list = envEmail.split(',').map((e) => e.trim().toLowerCase());
+    return Array.from(new Set([...list, ...DEFAULT_AUTHORIZED_ADMIN_EMAILS]));
   }
-  // Default authorized administrator Gmail as configured for this project
-  return 'ranidas784170@gmail.com';
+  return DEFAULT_AUTHORIZED_ADMIN_EMAILS;
+}
+
+export function getAuthorizedAdminEmail(): string {
+  const allowed = getAuthorizedAdminEmails();
+  return allowed[0] || 'sibaraj789090@gmail.com';
 }
 
 export function isAuthorizedAdminEmail(email: string | undefined | null): boolean {
   if (!email || typeof email !== 'string') return false;
-  const target = getAuthorizedAdminEmail();
-  return email.trim().toLowerCase() === target;
+  const normalized = email.trim().toLowerCase();
+  const allowed = getAuthorizedAdminEmails();
+  return allowed.includes(normalized);
 }
 
 interface AdminSession {

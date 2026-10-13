@@ -90,7 +90,7 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({ onLoginSuccess, 
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="authorized-admin@gmail.com"
+                placeholder="sibaraj789090@gmail.com"
                 className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition"
                 autoComplete="email"
                 disabled={isSubmitting}

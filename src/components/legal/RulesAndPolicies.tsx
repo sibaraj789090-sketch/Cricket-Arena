@@ -5,7 +5,7 @@ import { useTournament } from '../../context/TournamentContext';
 interface RulesAndPoliciesProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultSection?: 'rules' | 'points' | 'terms' | 'privacy' | 'contact';
+  defaultSection?: 'rules' | 'points' | 'ludo' | 'terms' | 'privacy' | 'contact';
 }
 
 export const RulesAndPolicies: React.FC<RulesAndPoliciesProps> = ({
@@ -13,7 +13,7 @@ export const RulesAndPolicies: React.FC<RulesAndPoliciesProps> = ({
   onClose,
   defaultSection = 'rules',
 }) => {
-  const [activeTab, setActiveTab] = useState<'rules' | 'points' | 'terms' | 'privacy' | 'contact'>(
+  const [activeTab, setActiveTab] = useState<'rules' | 'points' | 'ludo' | 'terms' | 'privacy' | 'contact'>(
     defaultSection
   );
   const { pointsConfig } = useTournament();
@@ -44,8 +44,9 @@ export const RulesAndPolicies: React.FC<RulesAndPoliciesProps> = ({
         {/* Tab Buttons */}
         <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 mb-4 overflow-x-auto">
           {[
-            { id: 'rules', label: 'Squad Rules' },
-            { id: 'points', label: 'Points System' },
+            { id: 'rules', label: 'Cricket Squad' },
+            { id: 'ludo', label: '🎲 Timer Ludo' },
+            { id: 'points', label: 'Cricket Points' },
             { id: 'terms', label: 'Fair Play Terms' },
             { id: 'privacy', label: 'Privacy' },
             { id: 'contact', label: 'Contact' },
@@ -55,7 +56,7 @@ export const RulesAndPolicies: React.FC<RulesAndPoliciesProps> = ({
               onClick={() => setActiveTab(tab.id as any)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
                 activeTab === tab.id
-                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm font-bold'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -102,6 +103,73 @@ export const RulesAndPolicies: React.FC<RulesAndPoliciesProps> = ({
                 <p>• <strong>Captain:</strong> Receives <strong className="text-emerald-400">{multipliers.captain}x</strong> Fantasy Points.</p>
                 <p>• <strong>Vice-Captain:</strong> Receives <strong className="text-emerald-400">{multipliers.viceCaptain}x</strong> Fantasy Points.</p>
                 <p>• <strong>Match Lock:</strong> Squad submissions are locked once match play begins.</p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ludo' && (
+            <div className="space-y-3.5">
+              <div className="p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl space-y-1">
+                <h3 className="font-bold text-amber-300 text-sm flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                  Timer Ludo — Highest Score Wins Rules
+                </h3>
+                <p className="text-slate-300 leading-relaxed text-xs">
+                  A modern, fast-paced score-based Ludo format where the player with the highest total points at the end of the official match duration wins the match!
+                </p>
+              </div>
+
+              {/* Match Durations */}
+              <div className="grid grid-cols-2 gap-2 text-slate-200">
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
+                  <span className="text-blue-400 font-bold block text-xs">2-Player Matches (1v1)</span>
+                  <p className="text-base font-black font-mono text-white">10 Minutes</p>
+                  <p className="text-[10px] text-slate-400">Timer starts when both players connect</p>
+                </div>
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
+                  <span className="text-purple-400 font-bold block text-xs">4-Player Matches (Free-for-All)</span>
+                  <p className="text-base font-black font-mono text-white">15 Minutes</p>
+                  <p className="text-[10px] text-slate-400">Timer starts when all 4 players connect</p>
+                </div>
+              </div>
+
+              {/* Scoring Rules Matrix */}
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-3.5 space-y-2">
+                <h4 className="font-bold text-white text-xs">Scoring System:</h4>
+                <div className="space-y-1.5 text-[11px] text-slate-300">
+                  <div className="flex justify-between border-b border-slate-800 pb-1">
+                    <span><strong>1. Dice Points:</strong> Each roll of 1 to 6</span>
+                    <span className="font-mono font-bold text-amber-400">+1 to +6 pts (equal to dice)</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-800 pb-1">
+                    <span><strong>2. Opponent Token Capture:</strong></span>
+                    <span className="font-mono font-bold text-emerald-400">Transfers victim's token score</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-800 pb-1">
+                    <span><strong>3. Reaching Home:</strong> Token enters final triangle</span>
+                    <span className="font-mono font-bold text-amber-400">+60 Bonus Points (once per token)</span>
+                  </div>
+                  <div className="flex justify-between pb-0.5">
+                    <span><strong>4. Token Reset on Capture:</strong> Victim token returned to yard</span>
+                    <span className="font-mono font-bold text-rose-400">Token score deducted &amp; reset to 0</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Deterministic Tie-Breaker */}
+              <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1 text-xs">
+                <h4 className="font-bold text-amber-400 text-xs">Deterministic Tie-Breaker Rule:</h4>
+                <p className="text-[11px] text-slate-300 leading-relaxed font-mono">
+                  Hierarchy: 1) Highest Score ➔ 2) Most Home Tokens ➔ 3) Most Captures ➔ 4) Fewest Timeouts
+                </p>
+              </div>
+
+              {/* Turn Timers & Fair-Play */}
+              <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1 text-xs">
+                <h4 className="font-bold text-white text-xs">Turn Timers &amp; Anti-Abandonment:</h4>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Players receive a 30-second countdown for each turn. Failing to play 3 consecutive turns results in an automated forfeit to protect opponents from stalling. Refreshing or switching devices safely preserves the server match clock and score records.
+                </p>
               </div>
             </div>
           )}

@@ -1,4 +1,4 @@
-import { LudoColor, LudoGameState, LudoToken } from '../types';
+import { LudoColor, LudoGameState, LudoToken } from '../types/index';
 
 // Track offset for each color on the 52-cell main loop
 export const COLOR_OFFSETS: Record<LudoColor, number> = {
@@ -108,8 +108,10 @@ export function getGlobalTrackIndex(color: LudoColor, step: number): number | nu
 }
 
 export function getTokenCoordinates(token: LudoToken): [number, number] {
-  if (token.step === -1) {
-    return YARD_SLOTS[token.color][token.id];
+  if (token.step < 0) {
+    // Starting square fallback for any negative step
+    const globalIdx = getGlobalTrackIndex(token.color, 0)!;
+    return TRACK_COORDINATES[globalIdx];
   }
   if (token.step <= 50) {
     const globalIdx = getGlobalTrackIndex(token.color, token.step)!;
@@ -124,11 +126,12 @@ export function getTokenCoordinates(token: LudoToken): [number, number] {
 export function createInitialLudoGame(playerCount: 2 | 4): LudoGameState {
   const players: LudoColor[] = playerCount === 2 ? ['red', 'yellow'] : ['red', 'green', 'yellow', 'blue'];
 
+  // All 4 tokens initialize directly on each player's marked STAR starting square (step 0)
   const createTokens = (color: LudoColor): LudoToken[] => [
-    { id: 0, color, step: -1, score: 0, reachedHome: false },
-    { id: 1, color, step: -1, score: 0, reachedHome: false },
-    { id: 2, color, step: -1, score: 0, reachedHome: false },
-    { id: 3, color, step: -1, score: 0, reachedHome: false },
+    { id: 0, color, step: 0, score: 0, reachedHome: false },
+    { id: 1, color, step: 0, score: 0, reachedHome: false },
+    { id: 2, color, step: 0, score: 0, reachedHome: false },
+    { id: 3, color, step: 0, score: 0, reachedHome: false },
   ];
 
   const tokens: Record<LudoColor, LudoToken[]> = {
@@ -167,10 +170,11 @@ export function capitalize(str: string): string {
 }
 
 // Validation: Can token move with given dice roll?
+// In Timer Ludo, all 4 tokens start on the board at step 0 and can move on any dice roll (1 to 6).
 export function canTokenMove(token: LudoToken, dice: number): boolean {
   if (token.step === 56) return false; // already in home
-  if (token.step === -1) return dice === 6; // need 6 to leave yard
-  return token.step + dice <= 56; // must not overshoot home 56
+  const currentStep = token.step < 0 ? 0 : token.step;
+  return currentStep + dice <= 56; // must not overshoot home 56
 }
 
 // Get all legal token IDs that current player can move

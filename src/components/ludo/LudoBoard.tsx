@@ -12,9 +12,10 @@ import { Star, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Crown } from 'lucide-r
 interface LudoBoardProps {
   gameState: LudoGameState;
   onSelectToken: (tokenId: number) => void;
+  className?: string;
 }
 
-export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken }) => {
+export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken, className = '' }) => {
   const { currentTurn, hasRolled, tokens, highlightedTokenIds } = gameState;
 
   // Rich theme colors
@@ -69,17 +70,16 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken }
 
     (Object.keys(tokens) as LudoColor[]).forEach((color) => {
       tokens[color].forEach((tok) => {
-        if (tok.step === -1) {
-          const slot = YARD_SLOTS[color][tok.id];
-          if (slot[0] === row && slot[1] === col) list.push(tok);
-        } else if (tok.step <= 50) {
-          const globalIdx = getGlobalTrackIndex(color, tok.step);
+        // In Timer Ludo, all tokens live directly on the board starting on their marked STAR square
+        const effectiveStep = tok.step < 0 ? 0 : tok.step;
+        if (effectiveStep <= 50) {
+          const globalIdx = getGlobalTrackIndex(color, effectiveStep);
           if (globalIdx !== null) {
             const coord = TRACK_COORDINATES[globalIdx];
             if (coord[0] === row && coord[1] === col) list.push(tok);
           }
-        } else if (tok.step <= 55) {
-          const homeIdx = tok.step - 51;
+        } else if (effectiveStep <= 55) {
+          const homeIdx = effectiveStep - 51;
           const coord = HOME_PATHS[color][homeIdx];
           if (coord[0] === row && coord[1] === col) list.push(tok);
         }
@@ -134,7 +134,7 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken }
   };
 
   return (
-    <div className="w-full max-w-[360px] sm:max-w-[390px] mx-auto aspect-square p-2 bg-gradient-to-b from-[#0e172e] to-[#080d1a] rounded-3xl shadow-[0_15px_35px_rgba(0,0,0,0.6)] border-2 border-slate-700/60 select-none flex items-center justify-center">
+    <div className={`w-full h-full max-w-full aspect-square p-1 sm:p-2 bg-gradient-to-b from-[#0e172e] to-[#080d1a] rounded-2xl sm:rounded-3xl shadow-[0_15px_35px_rgba(0,0,0,0.6)] border-2 border-slate-700/60 select-none flex items-center justify-center ${className}`}>
       {/* Authentic Board Grid 15x15 */}
       <div className="relative w-full h-full grid grid-cols-15 grid-rows-15 gap-[1px] bg-slate-950 p-[2px] rounded-2xl shadow-inner border border-slate-800 overflow-hidden">
         {Array.from({ length: 15 }).map((_, r) =>
@@ -272,17 +272,38 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken }
               bgStyle = 'bg-slate-100/95';
             }
 
+            const legalTokenOnCell = tokensHere.find(
+              (tok) => tok.color === currentTurn && hasRolled && highlightedTokenIds.includes(tok.id)
+            );
+
             return (
               <div
                 key={`cell-${r}-${c}`}
                 style={{ gridColumn: `${c + 1} / span 1`, gridRow: `${r + 1} / span 1` }}
-                className={`relative flex items-center justify-center ${bgStyle} border border-slate-900/10 transition-colors`}
+                onClick={() => {
+                  if (legalTokenOnCell) {
+                    onSelectToken(legalTokenOnCell.id);
+                  }
+                }}
+                className={`relative flex items-center justify-center ${bgStyle} border border-slate-900/10 transition-colors ${
+                  legalTokenOnCell ? 'cursor-pointer' : ''
+                }`}
               >
                 {cellContent}
 
                 {/* Render tokens on this cell */}
                 {tokensHere.length > 0 && (
-                  <div className="absolute inset-0 flex items-center justify-center p-0.5">
+                  <div
+                    className={`absolute inset-0 p-[1.5px] pointer-events-auto ${
+                      tokensHere.length >= 4
+                        ? 'grid grid-cols-2 grid-rows-2 gap-[1px] items-center justify-items-center'
+                        : tokensHere.length === 3
+                        ? 'grid grid-cols-2 gap-[1px] items-center justify-items-center'
+                        : tokensHere.length === 2
+                        ? 'grid grid-cols-2 gap-[1.5px] items-center justify-items-center'
+                        : 'flex items-center justify-center'
+                    }`}
+                  >
                     {tokensHere.map((tok, idx) => {
                       const isLegal =
                         tok.color === currentTurn &&
@@ -290,45 +311,65 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken }
                         highlightedTokenIds.includes(tok.id);
 
                       const theme = colorThemes[tok.color];
+                      const isMulti = tokensHere.length > 1;
 
                       return (
                         <button
                           key={`tok-${tok.color}-${tok.id}`}
                           type="button"
                           disabled={!isLegal}
-                          onClick={() => onSelectToken(tok.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isLegal) onSelectToken(tok.id);
+                          }}
                           style={{
                             background: theme.tokenGradient,
                             borderColor: isLegal ? '#ffffff' : theme.dark,
                             boxShadow: isLegal
-                              ? `0 0 12px 3px ${theme.glow}, 0 4px 8px rgba(0,0,0,0.6)`
-                              : '0 2px 4px rgba(0,0,0,0.4)',
+                              ? `0 0 10px 3px ${theme.glow}, 0 2px 6px rgba(0,0,0,0.6)`
+                              : '0 1px 3px rgba(0,0,0,0.4)',
                           }}
-                          className={`relative rounded-full w-full h-full max-w-[17px] max-h-[17px] sm:max-w-[20px] sm:max-h-[20px] border-2 flex items-center justify-center transition-transform select-none ${
+                          className={`relative rounded-full border flex items-center justify-center transition-all select-none touch-manipulation ${
+                            isMulti
+                              ? tokensHere.length >= 4
+                                ? 'w-[10px] h-[10px] sm:w-[13px] sm:h-[13px] border-[1px]'
+                                : 'w-[12px] h-[12px] sm:w-[15px] sm:h-[15px] border-[1px]'
+                              : 'w-full h-full max-w-[20px] max-h-[20px] sm:max-w-[24px] sm:max-h-[24px] border-2'
+                          } ${
                             isLegal
-                              ? 'cursor-pointer scale-110 sm:scale-125 animate-bounce z-40 ring-2 ring-white ring-offset-1 ring-offset-slate-900'
+                              ? 'cursor-pointer scale-110 sm:scale-120 animate-bounce z-40 ring-1 sm:ring-2 ring-white'
                               : 'opacity-95 z-20 hover:scale-105'
-                          } ${tokensHere.length > 1 ? '-ml-1.5 first:ml-0' : ''}`}
+                          }`}
                           title={`${tok.color.toUpperCase()} Token ${tok.id + 1} (${
-                            tok.step === -1 ? 'Yard' : `Step ${tok.step}`
+                            tok.step < 0 || tok.step === 0 ? 'Start Star' : `Step ${tok.step}`
                           })`}
                         >
-                          {/* Inner glossy gem center */}
-                          <div className="w-1.5 h-1.5 rounded-full bg-white/95 shadow-sm" />
+                          {/* Inner glossy gem center or token number */}
+                          {isMulti ? (
+                            <span className="text-[6px] sm:text-[8px] font-black leading-none text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
+                              {tok.id + 1}
+                            </span>
+                          ) : (
+                            <div className="w-1.5 h-1.5 rounded-full bg-white/95 shadow-sm" />
+                          )}
 
                           {/* Token recorded score in Timer Ludo */}
                           {tok.score !== undefined && tok.score > 0 && (
                             <span
-                              className="absolute -bottom-1 -left-1 bg-amber-400 text-slate-950 font-mono text-[7px] sm:text-[8px] font-black rounded-full px-1 border border-black/60 shadow-md leading-none z-30"
+                              className={`absolute bg-amber-400 text-slate-950 font-mono font-black rounded-full border border-black/60 shadow-md leading-none z-30 ${
+                                isMulti
+                                  ? '-bottom-1.5 -right-1 text-[6px] px-0.5'
+                                  : '-bottom-1 -left-1 text-[7px] sm:text-[8px] px-1'
+                              }`}
                               title={`Token holds ${tok.score} points`}
                             >
                               {tok.score}
                             </span>
                           )}
 
-                          {/* Multiple tokens counter badge if clustered */}
-                          {tokensHere.length > 1 && idx === tokensHere.length - 1 && (
-                            <span className="absolute -top-1.5 -right-1.5 bg-black/80 text-white font-mono text-[8px] font-black rounded-full px-1 border border-white/50 leading-none z-30">
+                          {/* Clustered counter badge if more than 4 tokens */}
+                          {tokensHere.length > 4 && idx === tokensHere.length - 1 && (
+                            <span className="absolute -top-1.5 -right-1.5 bg-black/90 text-white font-mono text-[7px] font-black rounded-full px-1 border border-white/60 leading-none z-30">
                               {tokensHere.length}
                             </span>
                           )}

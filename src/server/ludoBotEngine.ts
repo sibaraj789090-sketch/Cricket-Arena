@@ -22,7 +22,7 @@ import {
 } from '../types/ludoBot';
 import { LudoCashMatch, LudoOnlinePlayer } from '../types/ludoCash';
 import { LudoColor } from '../types';
-import { createInitialLudoGame } from '../lib/ludoEngine';
+import { createInitialLudoGame, COLOR_OFFSETS, SAFE_CELL_INDICES } from '../lib/ludoEngine';
 
 // Global Feature Flag (Defaulting to TRUE so instant matchmaking is enabled)
 export let LUDO_BOTS_ENABLED: boolean = process.env.LUDO_BOTS_ENABLED !== 'false';
@@ -349,39 +349,42 @@ export function selectBotMove(
   }
 
   // Strategy 3: Stronger Legal Move
-  // 1. Priority: Exit yard if roll is 6
-  if (roll === 6) {
-    const yardToken = legalMoves.find((id) => colorTokens[id].step === -1);
-    if (yardToken !== undefined) {
-      return yardToken;
-    }
-  }
+  // 1. Priority: Move token into Home (step 56) to collect 60 pts home bonus!
+  const homeToken = legalMoves.find((id) => {
+    const step = colorTokens[id].step < 0 ? 0 : colorTokens[id].step;
+    return step + roll === 56;
+  });
+  if (homeToken !== undefined) return homeToken;
 
   // 2. Priority: Capture opponent if any move lands on an opponent cell
   for (const tokenId of legalMoves) {
-    const currentStep = colorTokens[tokenId].step;
+    const currentStep = colorTokens[tokenId].step < 0 ? 0 : colorTokens[tokenId].step;
     const nextStep = currentStep + roll;
-    if (nextStep < 52) {
-      // Check if any opponent token is on target cell
-      for (const otherColor of Object.keys(gameState.tokens) as LudoColor[]) {
-        if (otherColor === color) continue;
-        const opTokens = gameState.tokens[otherColor];
-        for (const opId of [0, 1, 2, 3]) {
-          if (opTokens[opId].step >= 0 && opTokens[opId].step < 52) {
-            // Simplified collision check or capture priority
-            if (nextStep === 56) return tokenId; // Entering goal
+    if (nextStep <= 50) {
+      const myGlobalIdx = (COLOR_OFFSETS[color] + nextStep) % 52;
+      if (!SAFE_CELL_INDICES.has(myGlobalIdx)) {
+        for (const otherColor of Object.keys(gameState.tokens) as LudoColor[]) {
+          if (otherColor === color) continue;
+          const opTokens = gameState.tokens[otherColor];
+          for (const opTok of opTokens) {
+            if (opTok.step >= 0 && opTok.step <= 50) {
+              const otherGlobalIdx = (COLOR_OFFSETS[otherColor] + opTok.step) % 52;
+              if (otherGlobalIdx === myGlobalIdx) {
+                return tokenId; // Capture this opponent token!
+              }
+            }
           }
         }
       }
     }
   }
 
-  // 3. Priority: Token that can enter home column or goal
-  const goalToken = legalMoves.find((id) => {
-    const step = colorTokens[id].step;
-    return step + roll === 56 || (step < 51 && step + roll >= 51);
+  // 3. Priority: Token that can enter colored home stretch (safe from captures)
+  const homeStretchToken = legalMoves.find((id) => {
+    const step = colorTokens[id].step < 0 ? 0 : colorTokens[id].step;
+    return step < 51 && step + roll >= 51;
   });
-  if (goalToken !== undefined) return goalToken;
+  if (homeStretchToken !== undefined) return homeStretchToken;
 
   // 4. Default: Pick token furthest along the track
   return legalMoves.reduce((best, curr) => {

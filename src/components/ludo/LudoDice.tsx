@@ -10,6 +10,8 @@ interface LudoDiceProps {
   canRoll: boolean;
   onRoll: () => void;
   disabled?: boolean;
+  playerScore?: number;
+  isLeader?: boolean;
 }
 
 export const LudoDice: React.FC<LudoDiceProps> = ({
@@ -21,6 +23,8 @@ export const LudoDice: React.FC<LudoDiceProps> = ({
   canRoll,
   onRoll,
   disabled = false,
+  playerScore,
+  isLeader = false,
 }) => {
   // Color configuration
   const colorStyles: Record<
@@ -159,7 +163,7 @@ export const LudoDice: React.FC<LudoDiceProps> = ({
             ? `0 0 16px 3px ${currentStyle.glowColor}, 0 6px 12px rgba(0,0,0,0.5), inset 0 2px 2px rgba(255,255,255,0.9)`
             : '0 3px 6px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.6)',
         }}
-        className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-white via-slate-100 to-slate-200 border-2 flex items-center justify-center transition-all select-none ${
+        className={`relative w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-gradient-to-br from-white via-slate-100 to-slate-200 border-2 flex items-center justify-center transition-all select-none ${
           disabled
             ? 'opacity-40 cursor-not-allowed border-slate-700 bg-slate-800'
             : isActive
@@ -201,6 +205,21 @@ export const LudoDice: React.FC<LudoDiceProps> = ({
         <span className="mt-1.5 text-[10px] font-extrabold text-white bg-slate-900/90 px-2 py-0.5 rounded-full border border-slate-700">
           Rolled: {diceValue}
         </span>
+      )}
+
+      {/* Live Timer Ludo Score Pill */}
+      {playerScore !== undefined && (
+        <div
+          className={`mt-1 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black font-mono shadow-sm border ${
+            isLeader
+              ? 'bg-amber-400 text-slate-950 border-amber-300'
+              : 'bg-slate-900/90 text-slate-200 border-slate-700'
+          }`}
+          title={`${playerName}: ${playerScore} points`}
+        >
+          {isLeader && <span>👑</span>}
+          <span>{playerScore} pts</span>
+        </div>
       )}
     </div>
   );

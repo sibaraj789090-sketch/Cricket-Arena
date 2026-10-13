@@ -79,6 +79,21 @@ function CricketArenaApp() {
     setCurrentTab('rankings');
   };
 
+  const isPlayingLudoMatch = currentTab === 'ludo-match' && Boolean(activeLudoMatchId);
+
+  // Dedicated Full-Screen Gameplay View
+  // Hides top header, logo, tagline, cricket/ludo switcher, banners, and bottom navigation
+  if (isPlayingLudoMatch && activeLudoMatchId) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#070b14] text-slate-100 flex flex-col overflow-hidden select-none">
+        <LudoOnlineMatchView
+          matchId={activeLudoMatchId}
+          onExit={() => setActiveLudoMatchId(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
       {/* Top Header */}

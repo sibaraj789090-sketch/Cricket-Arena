@@ -531,15 +531,20 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
                 >
                   {/* Top Badge Row */}
                   <div className="flex items-center justify-between mb-2">
-                    <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
-                        is2P
-                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                          : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                      }`}
-                    >
-                      {is2P ? '2 Players (1v1)' : '4 Players Free-for-all'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
+                          is2P
+                            ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                            : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                        }`}
+                      >
+                        {is2P ? '2P (10 Mins)' : '4P (15 Mins)'}
+                      </span>
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Score Ludo
+                      </span>
+                    </div>
 
                     {/* Waiting Status / Game Status */}
                     <span className="flex items-center gap-1.5 text-[10px] font-bold">
@@ -707,6 +712,20 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
 
             {/* Financial Details Ledger */}
             <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Match Mode:</span>
+                <span className="font-bold text-amber-300">
+                  Timer Ludo — Highest Score Wins
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Match Duration:</span>
+                <span className="font-bold text-white font-mono">
+                  {tableToConfirm.mode === 2 ? 'Exactly 10 Minutes (2P)' : 'Exactly 15 Minutes (4P)'}
+                </span>
+              </div>
+
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Format:</span>
                 <span className="font-bold text-white">

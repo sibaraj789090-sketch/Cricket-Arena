@@ -663,68 +663,152 @@ export const AdminLudoTablesSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Global Configuration Card */}
-      <form onSubmit={handleSaveConfig} className="bg-[#0f172a] rounded-2xl border border-slate-800 p-4 space-y-3">
+      {/* Global Configuration Card — Timer Ludo & Fair Play Rules */}
+      <form onSubmit={handleSaveConfig} className="bg-[#0f172a] rounded-2xl border border-slate-800 p-4 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-          <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-            <Settings className="w-3.5 h-3.5 text-blue-400" />
-            <span>Multiplayer &amp; Fair Play Rules</span>
-          </h4>
-          <span className="text-[10px] text-slate-400">Authoritative Server Settings</span>
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                Timer Ludo — Highest Score Wins Configuration
+              </h4>
+              <p className="text-[10px] text-slate-400">
+                Authoritative match durations, dice scoring, capture transfers, and deterministic tie-breaker settings.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-500/30">
+            Server Authoritative
+          </span>
         </div>
 
+        {/* Master Toggles Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          {/* Online Master Toggle */}
+          {/* Timer Ludo Enabled Toggle */}
           <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <span className="font-bold text-white block">Online Platform</span>
-              <span className="text-[11px] text-slate-400">Master matchmaking switch</span>
+              <span className="font-bold text-white block">Timer Ludo Mode</span>
+              <span className="text-[11px] text-slate-400">Highest Score Wins format</span>
             </div>
             <button
               type="button"
-              onClick={() => setConfig({ ...config, onlineLudoEnabled: !config.onlineLudoEnabled })}
-              className={`p-1 rounded-lg ${config.onlineLudoEnabled ? 'text-emerald-400' : 'text-slate-500'}`}
+              onClick={() => setConfig({ ...config, timerLudoEnabled: !config.timerLudoEnabled })}
+              className={`p-1 rounded-lg ${config.timerLudoEnabled ? 'text-amber-400' : 'text-slate-500'}`}
             >
-              {config.onlineLudoEnabled ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
+              {config.timerLudoEnabled ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
             </button>
           </div>
 
-          {/* 2-Player Toggle */}
+          {/* Dice Points Rule Toggle */}
           <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <span className="font-bold text-white block">2-Player Tables (1v1)</span>
-              <span className="text-[11px] text-slate-400">Enable 2-player format</span>
+              <span className="font-bold text-white block">Dice Points (1-6 pts)</span>
+              <span className="text-[11px] text-slate-400">Roll value added to score</span>
             </div>
             <button
               type="button"
-              onClick={() => setConfig({ ...config, allowTwoPlayer: !config.allowTwoPlayer })}
-              className={`p-1 rounded-lg ${config.allowTwoPlayer ? 'text-emerald-400' : 'text-slate-500'}`}
+              onClick={() => setConfig({ ...config, dicePointsEnabled: !config.dicePointsEnabled })}
+              className={`p-1 rounded-lg ${config.dicePointsEnabled ? 'text-emerald-400' : 'text-slate-500'}`}
             >
-              {config.allowTwoPlayer ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
+              {config.dicePointsEnabled ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
             </button>
           </div>
 
-          {/* 4-Player Toggle */}
+          {/* Capture Score Transfer Toggle */}
           <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <span className="font-bold text-white block">4-Player Tables</span>
-              <span className="text-[11px] text-slate-400">Enable 4-player format</span>
+              <span className="font-bold text-white block">Capture Score Transfer</span>
+              <span className="text-[11px] text-slate-400">Steal captured token's pts</span>
             </div>
             <button
               type="button"
-              onClick={() => setConfig({ ...config, allowFourPlayer: !config.allowFourPlayer })}
-              className={`p-1 rounded-lg ${config.allowFourPlayer ? 'text-emerald-400' : 'text-slate-500'}`}
+              onClick={() => setConfig({ ...config, captureTransferEnabled: !config.captureTransferEnabled })}
+              className={`p-1 rounded-lg ${config.captureTransferEnabled ? 'text-emerald-400' : 'text-slate-500'}`}
             >
-              {config.allowFourPlayer ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
+              {config.captureTransferEnabled ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
             </button>
           </div>
         </div>
 
-        {/* Turn Timeout & Max Timeouts */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
-          <div>
-            <label className="text-slate-400 font-semibold block mb-1">
-              Turn Timeout (Seconds):
+        {/* Durations & Home Bonus Inputs */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          {/* 2-Player Match Duration */}
+          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1">
+            <label className="text-slate-300 font-bold block flex items-center justify-between">
+              <span>2-Player Match Duration:</span>
+              <span className="text-[10px] text-amber-400 font-mono">Minutes</span>
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={config.durationMinutes2P}
+              onChange={(e) => setConfig({ ...config, durationMinutes2P: Math.max(1, Number(e.target.value)) })}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-amber-500"
+            />
+            <span className="text-[10px] text-slate-400 block">Default: 10 mins (or 8 mins)</span>
+          </div>
+
+          {/* 4-Player Match Duration */}
+          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1">
+            <label className="text-slate-300 font-bold block flex items-center justify-between">
+              <span>4-Player Match Duration:</span>
+              <span className="text-[10px] text-amber-400 font-mono">Minutes</span>
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={config.durationMinutes4P}
+              onChange={(e) => setConfig({ ...config, durationMinutes4P: Math.max(1, Number(e.target.value)) })}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-amber-500"
+            />
+            <span className="text-[10px] text-slate-400 block">Default: 15 minutes</span>
+          </div>
+
+          {/* Reaching Home Bonus */}
+          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1">
+            <label className="text-slate-300 font-bold block flex items-center justify-between">
+              <span>Home Token Bonus:</span>
+              <span className="text-[10px] text-emerald-400 font-mono">Points</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={500}
+              value={config.homeBonusPoints}
+              onChange={(e) => setConfig({ ...config, homeBonusPoints: Math.max(0, Number(e.target.value)) })}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-emerald-500"
+            />
+            <span className="text-[10px] text-slate-400 block">Awarded once per token (Default: 60)</span>
+          </div>
+        </div>
+
+        {/* Tie-Breaker Rule Selector & Timeouts */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          {/* Tie-Breaker Rule */}
+          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1 sm:col-span-1">
+            <label className="text-slate-300 font-bold block">
+              Deterministic Tie-Breaker:
+            </label>
+            <select
+              value={config.tieBreakerRule}
+              onChange={(e) => setConfig({ ...config, tieBreakerRule: e.target.value as any })}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:outline-none focus:border-blue-500"
+            >
+              <option value="home_tokens_then_captures">Home Tokens ➔ Captures ➔ Timeouts</option>
+              <option value="most_captures">Most Captures ➔ Home Tokens ➔ Timeouts</option>
+              <option value="least_timeouts">Fewest Timeouts ➔ Home Tokens ➔ Captures</option>
+            </select>
+            <span className="text-[10px] text-slate-400 block">Rule shown to players before match</span>
+          </div>
+
+          {/* Turn Timeout (Seconds) */}
+          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1">
+            <label className="text-slate-300 font-bold block">
+              Player Turn Timeout (Seconds):
             </label>
             <input
               type="number"
@@ -732,34 +816,46 @@ export const AdminLudoTablesSection: React.FC = () => {
               max={60}
               value={config.turnTimeoutSeconds}
               onChange={(e) => setConfig({ ...config, turnTimeoutSeconds: Number(e.target.value) })}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-blue-500"
             />
+            <span className="text-[10px] text-slate-400 block">Time to roll & move (Default: 30s)</span>
           </div>
 
-          <div>
-            <label className="text-slate-400 font-semibold block mb-1">
-              Max Consecutive Timeouts Before Forfeit:
+          {/* Max Consecutive Timeouts */}
+          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-1">
+            <label className="text-slate-300 font-bold block">
+              Max Consecutive Timeouts:
             </label>
             <input
               type="number"
               min={1}
               max={5}
               value={config.maxTimeoutsBeforeForfeit}
-              onChange={(e) =>
-                setConfig({ ...config, maxTimeoutsBeforeForfeit: Number(e.target.value) })
-              }
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+              onChange={(e) => setConfig({ ...config, maxTimeoutsBeforeForfeit: Number(e.target.value) })}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-blue-500"
             />
+            <span className="text-[10px] text-slate-400 block">Forfeit if missed (Default: 3)</span>
+          </div>
+        </div>
+
+        {/* Security & Anti-Cheat Assurance */}
+        <div className="p-3 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-300 flex items-start gap-2">
+          <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold block text-white">Authoritative Fair-Play Guarantee:</span>
+            <span className="text-slate-300 text-[10px]">
+              Admins cannot alter live player scores or force match winners. Matches can be cancelled safely with audited reasons and 100% automated coin refunds.
+            </span>
           </div>
         </div>
 
         <button
           type="submit"
           disabled={isSavingConfig}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
+          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 transition shadow-lg cursor-pointer"
         >
           <Save className="w-3.5 h-3.5" />
-          <span>Save Multiplayer Config</span>
+          <span>Save Timer Ludo Settings</span>
         </button>
       </form>
 

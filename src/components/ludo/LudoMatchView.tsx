@@ -10,8 +10,10 @@ import {
   HelpCircle,
   Sparkles,
   Info,
+  MessageSquare,
 } from 'lucide-react';
 import { LudoColor, LudoGameState } from '../../types';
+import { LudoQuickMessage } from '../../types/ludoCash';
 import {
   createInitialLudoGame,
   getLegalMoves,
@@ -23,6 +25,7 @@ import {
 } from '../../lib/ludoEngine';
 import { LudoBoard } from './LudoBoard';
 import { LudoDice } from './LudoDice';
+import { LudoQuickChatModal, LudoSpeechBubble } from './LudoQuickChat';
 
 interface LudoMatchViewProps {
   onExit: () => void;
@@ -36,6 +39,16 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [showRulesModal, setShowRulesModal] = useState(false);
 
+  // Quick Chat State for Practice Mode
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [chatHistory, setChatHistory] = useState<LudoQuickMessage[]>([]);
+  const [activeBubbles, setActiveBubbles] = useState<Record<LudoColor, LudoQuickMessage | null>>({
+    red: null,
+    green: null,
+    yellow: null,
+    blue: null,
+  });
+
   // Individual persistent dice values for all 4 players
   const [playerDiceValues, setPlayerDiceValues] = useState<Record<LudoColor, number | null>>({
     red: null,
@@ -48,6 +61,77 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
   const triggerSound = (type: 'dice' | 'move' | 'capture' | 'win' | 'six') => {
     if (soundEnabled) {
       playLudoSound(type);
+    }
+  };
+
+  // Send quick chat in practice match
+  const handleSendQuickMessage = (text: string) => {
+    const currentColor = gameState.currentTurn;
+    const msg: LudoQuickMessage = {
+      id: `msg-${Date.now()}`,
+      senderId: 'user-player',
+      senderName: capitalize(currentColor),
+      senderColor: currentColor,
+      text,
+      timestamp: Date.now(),
+    };
+
+    setChatHistory((prev) => [...prev, msg]);
+    setActiveBubbles((prev) => ({
+      ...prev,
+      [currentColor]: msg,
+    }));
+
+    if (soundEnabled) {
+      playLudoSound('move');
+    }
+
+    setTimeout(() => {
+      setActiveBubbles((prev) => ({
+        ...prev,
+        [currentColor]: null,
+      }));
+    }, 4000);
+
+    // Realistic practice bot opponent reply simulation
+    const opponentColors = gameState.players.filter((c) => c !== currentColor);
+    if (opponentColors.length > 0) {
+      const responder = opponentColors[Math.floor(Math.random() * opponentColors.length)];
+      setTimeout(() => {
+        let replyText = 'Good luck! 🍀';
+        const lower = text.toLowerCase();
+        if (lower.includes('luck')) replyText = 'Thanks! You too! 🍀';
+        else if (lower.includes('nice') || lower.includes('well played')) replyText = 'Thank you! 🙏';
+        else if (lower.includes('six') || lower.includes('6')) replyText = 'Waiting for my 6 too! 🎲';
+        else if (lower.includes('hello')) replyText = 'Hello! Let’s play! 👋';
+        else if (lower.includes('oops')) replyText = 'Haha oops! 😅';
+        else if (lower.includes('gg')) replyText = 'Good game! 🤝';
+
+        const replyMsg: LudoQuickMessage = {
+          id: `reply-${Date.now()}`,
+          senderId: `bot-${responder}`,
+          senderName: `${capitalize(responder)}`,
+          senderColor: responder,
+          text: replyText,
+          timestamp: Date.now(),
+        };
+
+        setChatHistory((prev) => [...prev, replyMsg]);
+        setActiveBubbles((prev) => ({
+          ...prev,
+          [responder]: replyMsg,
+        }));
+        if (soundEnabled) {
+          playLudoSound('move');
+        }
+
+        setTimeout(() => {
+          setActiveBubbles((prev) => ({
+            ...prev,
+            [responder]: null,
+          }));
+        }, 4000);
+      }, 1200);
     }
   };
 
@@ -166,24 +250,17 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
     let awardExtraTurn = roll === 6;
     let actionDescription = '';
 
-    if (token.step === -1) {
-      // Exit yard to start square
-      token.step = 0;
-      actionDescription = `${capitalize(color)} entered track with Token #${tokenId + 1}!`;
-      triggerSound('move');
-    } else {
-      // Advance token on track or home stretch
-      token.step += roll;
-      triggerSound('move');
+    const currentStep = token.step < 0 ? 0 : token.step;
+    token.step = currentStep + roll;
+    triggerSound('move');
 
-      // Check if token reached Home triangle
-      if (token.step === 56) {
-        awardExtraTurn = true;
-        actionDescription = `🎉 ${capitalize(color)}'s Token #${tokenId + 1} reached HOME! Extra turn!`;
-        triggerSound('win');
-      } else {
-        actionDescription = `${capitalize(color)} moved Token #${tokenId + 1} (${roll} squares).`;
-      }
+    // Check if token reached Home triangle
+    if (token.step === 56) {
+      awardExtraTurn = true;
+      actionDescription = `🎉 ${capitalize(color)}'s Token #${tokenId + 1} reached HOME! Extra turn!`;
+      triggerSound('win');
+    } else {
+      actionDescription = `${capitalize(color)} moved Token #${tokenId + 1} (${roll} squares).`;
     }
 
     playerTokens[tokenId] = token;
@@ -203,13 +280,13 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
               if (oppTok.step >= 0 && oppTok.step <= 50) {
                 const oppGlobalIdx = getGlobalTrackIndex(oppColor, oppTok.step);
                 if (oppGlobalIdx === myGlobalIdx) {
-                  // Capture! Send back to yard
+                  // Capture! Send back to starting star square
                   awardExtraTurn = true;
                   actionDescription = `💥 ${capitalize(color)} captured ${capitalize(
                     oppColor
                   )}'s token! Extra turn awarded!`;
                   triggerSound('capture');
-                  return { ...oppTok, step: -1 };
+                  return { ...oppTok, step: 0, score: 0, reachedHome: false };
                 }
               }
               return oppTok;
@@ -310,6 +387,15 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
 
     const homeTokensCount = gameState.tokens[color].filter((t) => t.step === 56).length;
 
+    const bubblePosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' =
+      color === 'red'
+        ? 'top-left'
+        : color === 'green'
+        ? 'top-right'
+        : color === 'blue'
+        ? 'bottom-left'
+        : 'bottom-right';
+
     return (
       <div
         key={`panel-${color}`}
@@ -321,6 +407,10 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
             : 'border-slate-800/80 bg-[#0d172e]/60 opacity-85'
         }`}
       >
+        <LudoSpeechBubble
+          message={activeBubbles[color]}
+          position={bubblePosition}
+        />
         {/* Left: Player Info & Progress */}
         <div className="flex-1 min-w-0 pr-2">
           <div className="flex items-center gap-1.5 mb-1">
@@ -407,6 +497,15 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Quick Chat Button */}
+          <button
+            onClick={() => setShowChatModal(true)}
+            className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-amber-400 hover:text-white transition cursor-pointer"
+            title="Quick Messages"
+          >
+            <MessageSquare className="w-4 h-4" />
+          </button>
+
           {/* Sound Toggle */}
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
@@ -573,13 +672,22 @@ export const LudoMatchView: React.FC<LudoMatchViewProps> = ({ onExit }) => {
             </ul>
             <button
               onClick={() => setShowRulesModal(false)}
-              className="w-full py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs mt-2"
+              className="w-full py-2 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs mt-2 cursor-pointer"
             >
               Understood
             </button>
           </div>
         </div>
       )}
+
+      {/* Quick Chat Modal */}
+      <LudoQuickChatModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        onSend={handleSendQuickMessage}
+        recentMessages={chatHistory}
+        currentUserId="user-player"
+      />
     </div>
   );
 };

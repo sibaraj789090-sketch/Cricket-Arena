@@ -291,9 +291,12 @@ export const AdminActiveMatchesSection: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
-                    <span className="flex items-center gap-1 text-slate-300">
-                      <Clock className="w-3.5 h-3.5 text-blue-400" />
+                  <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+                    <span className="flex items-center gap-1 text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-500/40 font-bold">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      Timer: {m.timeRemainingSeconds !== undefined ? formatElapsed(m.timeRemainingSeconds) : '0s'} remaining
+                    </span>
+                    <span className="flex items-center gap-1 text-slate-400">
                       Elapsed: {formatElapsed(m.elapsedSeconds)}
                     </span>
                   </div>
@@ -377,12 +380,15 @@ export const AdminActiveMatchesSection: React.FC = () => {
                             </div>
 
                             <div className="text-right">
+                              <span className="font-mono text-xs font-black text-amber-400 block">
+                                {m.gameState?.scores?.[p.color] ?? p.score ?? 0} pts
+                              </span>
                               <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 justify-end">
                                 <Wifi className="w-2.5 h-2.5" />
                                 Online
                               </span>
                               <span className="text-[10px] text-slate-500 font-mono block">
-                                Timeouts: {p.timeouts || 0}
+                                Timeouts: {p.timeouts || p.timeoutCount || 0}
                               </span>
                             </div>
                           </div>
@@ -546,7 +552,7 @@ export const AdminActiveMatchesSection: React.FC = () => {
                       <div className="grid grid-cols-4 gap-1 text-center font-mono text-[10px]">
                         {tokens.map((t, idx) => {
                           const isHome = t.step === 56;
-                          const inYard = t.step === -1 || t.step === 0;
+                          const atStart = t.step <= 0;
 
                           return (
                             <div
@@ -554,13 +560,13 @@ export const AdminActiveMatchesSection: React.FC = () => {
                               className={`p-1 rounded ${
                                 isHome
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                  : inYard
-                                  ? 'bg-slate-900 text-slate-500'
+                                  : atStart
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                                   : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                               }`}
                             >
                               <span>T{idx + 1}: </span>
-                              <strong>{isHome ? 'HOME' : inYard ? 'YARD' : `S${t.step}`}</strong>
+                              <strong>{isHome ? 'HOME' : atStart ? 'STAR' : `S${t.step}`}</strong>
                             </div>
                           );
                         })}

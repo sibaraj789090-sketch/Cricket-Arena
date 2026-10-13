@@ -40,7 +40,7 @@ const cashTables: LudoCashTable[] = generateDefaultCashTables();
 const adminConfig: LudoAdminConfig = {
   onlineLudoEnabled: true,
   timerLudoEnabled: true,
-  durationMinutes2P: 8,
+  durationMinutes2P: 10,
   durationMinutes4P: 15,
   homeBonusPoints: 60,
   dicePointsEnabled: true,
@@ -264,13 +264,32 @@ export function checkMatchTimerExpired(match: LudoCashMatch): boolean {
   return false;
 }
 
-/**
- * Periodic routine checking all live matches for timer expirations
- */
 function checkAllActiveMatchTimers() {
   for (const match of activeMatches.values()) {
-    if (match.status === 'in_progress' && !match.gameState.isGameOver && match.endsAt) {
-      checkMatchTimerExpired(match);
+    if (match.status === 'in_progress' && !match.gameState.isGameOver) {
+      if (match.endsAt) {
+        checkMatchTimerExpired(match);
+      }
+      if (match.status === 'in_progress' && !match.gameState.isGameOver && match.turnDeadline) {
+        const now = Date.now();
+        const deadline = new Date(match.turnDeadline).getTime();
+        if (now > deadline) {
+          const currentTurn = match.gameState.currentTurn;
+          const player = match.players.find((p) => p.color === currentTurn);
+          if (player) {
+            player.timeoutCount = (player.timeoutCount || 0) + 1;
+            if (player.timeoutCount >= adminConfig.maxTimeoutsBeforeForfeit) {
+              player.isOnline = false;
+              match.gameState.lastActionText = `⚠️ ${player.userName} exceeded ${adminConfig.maxTimeoutsBeforeForfeit} timeouts and forfeited!`;
+              finalizeTimerLudoMatch(match, `${player.userName} forfeited.`);
+            } else {
+              match.gameState.lastActionText = `⏱️ ${player.userName} turn timed out. Passing to next player.`;
+              advanceMatchTurn(match, false);
+              checkAndRunBotTurn(match);
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -374,6 +393,7 @@ export function createAndStartMatch(
     scoreHistory: [],
     tieBreakerRule: getTieBreakerDescription(adminConfig.tieBreakerRule),
     turnDeadline: new Date(Date.now() + adminConfig.turnTimeoutSeconds * 1000).toISOString(),
+    chatMessages: [],
   };
 
   if (isSimulation) {
@@ -653,19 +673,13 @@ function executeTokenMove(
     };
   }
 
-  if (token.step === -1) {
-    if (roll !== 6) return { success: false, error: 'Need 6 to leave yard' };
-    token.step = 0;
-    // Record roll score on this token
-    token.score = (token.score || 0) + roll;
-    actionDesc = `${capitalize(color)} entered track at start! Token active with ${token.score} pts.`;
-  } else {
-    const nextStep = token.step + roll;
-    if (nextStep > 56) return { success: false, error: 'Overshot home' };
-    token.step = nextStep;
-    // Record roll score on this token
-    token.score = (token.score || 0) + roll;
-    actionDesc = `${capitalize(color)} moved to step ${nextStep}.`;
+  const currentStep = token.step < 0 ? 0 : token.step;
+  const nextStep = currentStep + roll;
+  if (nextStep > 56) return { success: false, error: 'Overshot home' };
+  token.step = nextStep;
+  // Record roll score on this token
+  token.score = (token.score || 0) + roll;
+  actionDesc = `${capitalize(color)} moved to step ${nextStep}.`;
 
     // 4. REACHING HOME: Award 60 points bonus only once per token
     if (token.step === 56) {
@@ -764,8 +778,8 @@ function executeTokenMove(
                     });
                   }
 
-                  // Reset captured token to yard with ZERO points (prevents duplicate transfers)
-                  otherToken.step = -1;
+                  // Reset captured token to starting star position with ZERO points (prevents duplicate transfers)
+                  otherToken.step = 0;
                   otherToken.score = 0;
                   otherToken.reachedHome = false;
 
@@ -778,7 +792,6 @@ function executeTokenMove(
         });
       }
     }
-  }
 
   match.gameState.lastActionText = actionDesc;
 
@@ -1180,37 +1193,159 @@ ludoRouter.post('/match/:matchId/leave', (req: Request, res: Response) => {
 
   if (match.status === 'in_progress' && !match.gameState.isGameOver) {
     const quittingPlayer = match.players.find((p) => p.userId === userId);
-    const opponent = match.players.find((p) => p.userId !== userId);
+    if (!quittingPlayer) return res.json({ success: true, match });
 
-    if (quittingPlayer && opponent) {
-      match.gameState.isGameOver = true;
-      match.status = 'completed';
-      match.completedAt = new Date().toISOString();
-      match.winnerId = opponent.userId;
-      match.winnerName = opponent.userName;
-      match.winnerColor = opponent.color;
-      match.gameState.winners = [opponent.color];
-      match.gameState.lastActionText = `🏳️ ${quittingPlayer.userName} left the table. ${opponent.userName} wins by forfeit!`;
+    quittingPlayer.hasForfeited = true;
+    quittingPlayer.isOnline = false;
+    quittingPlayer.isLeft = true;
 
-      // Record in ledger
-      matchHistory.unshift({
-        id: `rec-${match.id}-${opponent.userId}`,
-        userId: opponent.userId,
-        userName: opponent.userName,
-        matchId: match.id,
-        tableTitle: `₹${match.entryFee} (${match.playerCount}P)`,
-        entryFee: match.entryFee,
-        mode: match.playerCount,
-        prizeWon: match.prizeAmount,
-        isWinner: true,
-        status: 'completed',
-        referenceId: `LUDO-FORFEIT-${match.id}`,
-        timestamp: new Date().toISOString(),
-      });
+    // Remaining non-forfeited active players
+    const remainingActivePlayers = match.players.filter((p) => !p.hasForfeited);
+
+    if (remainingActivePlayers.length <= 1) {
+      // 1 or fewer active players remain -> sole remaining player wins by forfeit
+      const winner = remainingActivePlayers[0] || match.players.find((p) => p.userId !== userId);
+      if (winner) {
+        match.gameState.isGameOver = true;
+        match.status = 'completed';
+        match.completedAt = new Date().toISOString();
+        match.winnerId = winner.userId;
+        match.winnerName = winner.userName;
+        match.winnerColor = winner.color;
+        match.gameState.winners = [winner.color];
+        match.gameState.lastActionText = `🏳️ ${quittingPlayer.userName} left the table. ${winner.userName} wins by forfeit!`;
+
+        // Record in ledger
+        matchHistory.unshift({
+          id: `rec-${match.id}-${winner.userId}`,
+          userId: winner.userId,
+          userName: winner.userName,
+          matchId: match.id,
+          tableTitle: `₹${match.entryFee} (${match.playerCount}P)`,
+          entryFee: match.entryFee,
+          mode: match.playerCount,
+          prizeWon: match.prizeAmount,
+          isWinner: true,
+          status: 'completed',
+          referenceId: `LUDO-FORFEIT-${match.id}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } else {
+      // Multiple active players remain (4-player match)
+      // Return quitting player's tokens to yard and zero their score
+      if (match.gameState.tokens[quittingPlayer.color]) {
+        match.gameState.tokens[quittingPlayer.color].forEach((t) => {
+          t.step = -1;
+          t.score = 0;
+        });
+      }
+      match.gameState.lastActionText = `🏳️ ${quittingPlayer.userName} left the match. Match continues with ${remainingActivePlayers.length} players!`;
+
+      // If it was the quitting player's turn, advance immediately to next active player
+      if (match.gameState.currentTurn === quittingPlayer.color) {
+        const activeColors = remainingActivePlayers.map((p) => p.color);
+        const nextColor = getNextPlayer(
+          match.gameState.currentTurn,
+          activeColors,
+          match.gameState.winners
+        );
+        match.gameState.currentTurn = nextColor;
+        match.gameState.hasRolled = false;
+        match.gameState.diceValue = null;
+        match.gameState.highlightedTokenIds = [];
+        match.gameState.extraTurn = false;
+        match.turnDeadline = new Date(Date.now() + adminConfig.turnTimeoutSeconds * 1000).toISOString();
+      }
     }
   }
 
   return res.json({ success: true, match });
+});
+
+// 9b. Send Quick Chat Message
+ludoRouter.post('/match/:matchId/chat', (req: Request, res: Response) => {
+  const { matchId } = req.params;
+  const { userId, text } = req.body;
+
+  const match = activeMatches.get(matchId);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'Message text required' });
+
+  const sender = match.players.find((p) => p.userId === userId);
+  if (!sender) return res.status(403).json({ error: 'User is not a participant in this match' });
+
+  if (!match.chatMessages) {
+    match.chatMessages = [];
+  }
+
+  const cleanText = text.trim().slice(0, 80);
+  const newMsg = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    senderId: sender.userId,
+    senderName: sender.userName.replace(' [BOT]', ''),
+    senderColor: sender.color,
+    text: cleanText,
+    timestamp: Date.now(),
+  };
+
+  match.chatMessages.push(newMsg);
+  // Keep last 30 messages
+  if (match.chatMessages.length > 30) {
+    match.chatMessages.shift();
+  }
+
+  // If match has simulated / bot opponents, trigger a realistic friendly quick response
+  const botOpponents = match.players.filter(
+    (p) => (p as any).isSimulated && !p.hasForfeited && p.userId !== userId
+  );
+  if (botOpponents.length > 0 && Math.random() < 0.8) {
+    const respondingBot = botOpponents[Math.floor(Math.random() * botOpponents.length)];
+    const replyDelay = Math.floor(1000 + Math.random() * 1500);
+
+    setTimeout(() => {
+      const activeMatch = activeMatches.get(matchId);
+      if (!activeMatch || activeMatch.status !== 'in_progress' || activeMatch.gameState.isGameOver) return;
+      if (!activeMatch.chatMessages) activeMatch.chatMessages = [];
+
+      let botReplyText = 'Good luck! 🍀';
+      const lower = cleanText.toLowerCase();
+      if (lower.includes('luck')) {
+        botReplyText = Math.random() > 0.5 ? 'Thanks! You too! 🍀' : 'May the best player win! 🎲';
+      } else if (lower.includes('nice') || lower.includes('well played') || lower.includes('king')) {
+        botReplyText = Math.random() > 0.5 ? 'Thank you! 🙏' : 'Haha, thanks! 🔥';
+      } else if (lower.includes('hello') || lower.includes('hi')) {
+        botReplyText = 'Hello! Let’s play! 👋';
+      } else if (lower.includes('six') || lower.includes('6')) {
+        botReplyText = Math.random() > 0.5 ? 'Waiting for my 6 too! 🎲' : 'Hope you get it! ✨';
+      } else if (lower.includes('hurry') || lower.includes('fast')) {
+        botReplyText = 'Rolling now! 🎲';
+      } else if (lower.includes('oops')) {
+        botReplyText = 'Happens to the best of us! 😅';
+      } else if (lower.includes('thanks') || lower.includes('thank')) {
+        botReplyText = 'Welcome! 😊';
+      } else if (lower.includes('gg')) {
+        botReplyText = 'Good game! 🤝';
+      } else {
+        const genericReplies = ['Nice move! 👏', 'Let’s go! 🔥', 'Good luck! 🍀', 'Well played! 👍'];
+        botReplyText = genericReplies[Math.floor(Math.random() * genericReplies.length)];
+      }
+
+      activeMatch.chatMessages.push({
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        senderId: respondingBot.userId,
+        senderName: respondingBot.userName.replace(' [BOT]', ''),
+        senderColor: respondingBot.color,
+        text: botReplyText,
+        timestamp: Date.now(),
+      });
+      if (activeMatch.chatMessages.length > 30) {
+        activeMatch.chatMessages.shift();
+      }
+    }, replyDelay);
+  }
+
+  return res.json({ success: true, message: newMsg, match });
 });
 
 // 10. Match History for User

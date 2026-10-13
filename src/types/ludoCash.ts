@@ -65,6 +65,8 @@ export interface LudoOnlinePlayer {
   score?: number; // Total match score in Timer Ludo
   scoreBreakdown?: LudoScoreBreakdown;
   isSimulated?: boolean;
+  hasForfeited?: boolean;
+  isLeft?: boolean;
 }
 
 export interface LudoCashMatch {
@@ -87,13 +89,23 @@ export interface LudoCashMatch {
 
   // Timer Ludo (Highest Score Wins) fields
   modeName?: 'Timer Ludo — Highest Score Wins';
-  durationMinutes: number; // 2P: 8 min, 4P: 15 min
-  durationSeconds: number; // 480s for 2P, 900s for 4P
+  durationMinutes: number; // 2P: 10 min (or admin configured), 4P: 15 min
+  durationSeconds: number; // 600s for 2P, 900s for 4P
   endsAt?: string; // Authoritative server timestamp when match timer expires
   timeRemainingSeconds?: number; // Real-time server remaining countdown
   scoreHistory?: LudoScoreEvent[];
   tieBreakerRule?: string; // Clear deterministic rule shown to players
   finalRankings?: LudoFinalRanking[];
+  chatMessages?: LudoQuickMessage[];
+}
+
+export interface LudoQuickMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColor: LudoColor;
+  text: string;
+  timestamp: number;
 }
 
 export interface LudoCashMatchRecord {
@@ -131,7 +143,7 @@ export interface RecentLudoWinner {
 export interface LudoAdminConfig {
   onlineLudoEnabled: boolean;
   timerLudoEnabled: boolean; // Enable or disable Timer Ludo
-  durationMinutes2P: number; // Default 8 min
+  durationMinutes2P: number; // Default 10 min
   durationMinutes4P: number; // Default 15 min
   homeBonusPoints: number; // Default 60 pts
   dicePointsEnabled: boolean; // 1=1pt, 2=2pt, ..., 6=6pt

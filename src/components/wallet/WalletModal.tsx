@@ -17,15 +17,19 @@ import {
   Building,
   RefreshCw,
   Lock,
+  Send,
+  FileText,
 } from 'lucide-react';
 import { useWallet } from '../../context/WalletContext';
 import { useAuth } from '../../context/AuthContext';
-import { CoinPackage, PayoutMethod } from '../../types/wallet';
+import { CoinPackage } from '../../types/wallet';
+import { AdminDataStore } from '../../lib/adminDataStore';
+import { CashAdditionRequest } from '../../types/adminControl';
 
 interface WalletModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'deposit' | 'withdraw' | 'history';
+  initialTab?: 'deposit' | 'request-cash' | 'history';
 }
 
 export const WalletModal: React.FC<WalletModalProps> = ({
@@ -39,14 +43,12 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     settings,
     packages,
     transactions,
-    withdrawals,
     buyCoins,
-    requestWithdrawal,
     refreshWallet,
     isProcessingPayment,
   } = useWallet();
 
-  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'deposit' | 'request-cash' | 'history'>(initialTab);
 
   // Custom Deposit State
   const [customAmount, setCustomAmount] = useState<number>(500);
@@ -63,20 +65,18 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   } | null>(null);
   const [paymentError, setPaymentError] = useState<string>('');
 
-  // Withdrawal State
-  const [withdrawAmount, setWithdrawAmount] = useState<number>(500);
-  const [withdrawMethod, setWithdrawMethod] = useState<PayoutMethod>('upi');
-  const [upiId, setUpiId] = useState<string>('');
-  const [accountHolderName, setAccountHolderName] = useState<string>(user?.name || '');
-  const [bankAccountNumber, setBankAccountNumber] = useState<string>('');
-  const [ifscCode, setIfscCode] = useState<string>('');
-  const [bankName, setBankName] = useState<string>('');
-  const [withdrawError, setWithdrawError] = useState<string>('');
-  const [withdrawSuccess, setWithdrawSuccess] = useState<string>('');
-  const [isSubmittingWithdrawal, setIsSubmittingWithdrawal] = useState<boolean>(false);
+  // Manual Cash Addition Request State (No auto-credit)
+  const [cashReqAmount, setCashReqAmount] = useState<number>(500);
+  const [cashReqReason, setCashReqReason] = useState<string>('');
+  const [cashReqSuccess, setCashReqSuccess] = useState<string>('');
+  const [cashReqError, setCashReqError] = useState<string>('');
+  const [isSubmittingCashReq, setIsSubmittingCashReq] = useState<boolean>(false);
+  const [myCashRequests, setMyCashRequests] = useState<CashAdditionRequest[]>(() =>
+    AdminDataStore.getCashRequests().filter((r) => r.userId === (user?.id || 'guest'))
+  );
 
   // History Filter
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'deposit' | 'withdrawal' | 'bonus'>('all');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'deposit' | 'game' | 'bonus'>('all');
   const [copiedRef, setCopiedRef] = useState<string>('');
 
   if (!isOpen) return null;
@@ -131,60 +131,53 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     }
   };
 
-  // Submit Withdrawal Request
-  const handleSubmitWithdrawal = async (e: React.FormEvent) => {
+  // Submit Cash Request (Never automatically credits)
+  const handleSubmitCashRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    setWithdrawError('');
-    setWithdrawSuccess('');
+    setCashReqError('');
+    setCashReqSuccess('');
 
-    if (withdrawAmount < settings.minWithdrawalInr) {
-      setWithdrawError(`Minimum withdrawal is ₹${settings.minWithdrawalInr}`);
-      return;
-    }
-    if (withdrawAmount > settings.maxWithdrawalInr) {
-      setWithdrawError(`Maximum withdrawal is ₹${settings.maxWithdrawalInr}`);
-      return;
-    }
-    if (withdrawAmount > wallet.balance) {
-      setWithdrawError(`Insufficient balance! Available: ${wallet.balance} coins`);
+    if (cashReqAmount < 10) {
+      setCashReqError('Minimum cash request is 10 coins.');
       return;
     }
 
-    if (withdrawMethod === 'upi') {
-      if (!upiId || !upiId.includes('@')) {
-        setWithdrawError('Please enter a valid UPI ID (e.g. mobile@upi or username@bank)');
-        return;
-      }
-    } else {
-      if (!bankAccountNumber || bankAccountNumber.length < 9) {
-        setWithdrawError('Please enter a valid bank account number');
-        return;
-      }
-      if (!ifscCode || ifscCode.length < 4) {
-        setWithdrawError('Please enter a valid IFSC code (e.g. HDFC0001234)');
-        return;
-      }
+    if (!cashReqReason.trim() || cashReqReason.trim().length < 4) {
+      setCashReqError('Please provide a reason or transaction reference (minimum 4 characters).');
+      return;
     }
 
-    setIsSubmittingWithdrawal(true);
-    const result = await requestWithdrawal(withdrawAmount, withdrawMethod, {
-      upiId: withdrawMethod === 'upi' ? upiId.trim() : undefined,
-      accountHolderName: accountHolderName.trim(),
-      bankAccountNumber: withdrawMethod === 'bank_transfer' ? bankAccountNumber.trim() : undefined,
-      ifscCode: withdrawMethod === 'bank_transfer' ? ifscCode.trim().toUpperCase() : undefined,
-      bankName: withdrawMethod === 'bank_transfer' ? bankName.trim() : undefined,
-    });
+    setIsSubmittingCashReq(true);
 
-    setIsSubmittingWithdrawal(false);
+    try {
+      const newReq = AdminDataStore.createCashRequest({
+        userId: user?.id || 'guest',
+        userName: user?.name || 'Player',
+        requestedAmount: cashReqAmount,
+        reason: cashReqReason,
+      });
 
-    if (result.success) {
-      setWithdrawSuccess(`Withdrawal request of ₹${withdrawAmount} submitted! Admin will verify and process.`);
-      setWithdrawAmount(settings.minWithdrawalInr);
-      setUpiId('');
-      setBankAccountNumber('');
-      setIfscCode('');
-    } else {
-      setWithdrawError(result.error || 'Failed to submit withdrawal request.');
+      // Also notify backend server
+      fetch('/api/wallet/cash-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.id || 'guest',
+          userName: user?.name || 'Player',
+          requestedAmount: cashReqAmount,
+          reason: cashReqReason,
+        }),
+      }).catch(() => {});
+
+      setMyCashRequests((prev) => [newReq, ...prev]);
+      setCashReqSuccess(
+        `Request for ₹${cashReqAmount} coins submitted for administrative review! It will be verified by an administrator. Coins are NOT automatically added.`
+      );
+      setCashReqReason('');
+    } catch (err: any) {
+      setCashReqError(err?.message || 'Failed to submit request.');
+    } finally {
+      setIsSubmittingCashReq(false);
     }
   };
 
@@ -192,7 +185,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const filteredTransactions = transactions.filter((t) => {
     if (historyFilter === 'all') return true;
     if (historyFilter === 'deposit') return t.type === 'deposit';
-    if (historyFilter === 'withdrawal') return t.type === 'withdrawal';
+    if (historyFilter === 'game') return t.type === 'game_fee' || t.type === 'game_reward';
     if (historyFilter === 'bonus') return t.type === 'starting_bonus' || t.type === 'admin_adjustment';
     return true;
   });
@@ -256,7 +249,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             {wallet.lockedBalance > 0 && (
               <div className="text-right bg-amber-500/10 border border-amber-500/30 rounded-xl px-2.5 py-1.5">
                 <span className="text-[10px] uppercase font-bold text-amber-400 flex items-center gap-1 justify-end">
-                  <Lock className="w-3 h-3" /> In Withdrawal / Match
+                  <Lock className="w-3 h-3" /> In Active Match Queue
                 </span>
                 <span className="text-sm font-mono font-bold text-slate-200">
                   ₹{wallet.lockedBalance} Cash
@@ -265,15 +258,15 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             )}
           </div>
 
-          {/* Real Cash Disclaimer Requirement */}
-          <div className="mt-3 p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/40 text-[11px] text-amber-300 flex items-start gap-2">
-            <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          {/* Real Cash Skill Gaming Notice */}
+          <div className="mt-3 p-2.5 rounded-xl bg-blue-950/30 border border-blue-500/40 text-[11px] text-blue-300 flex items-start gap-2">
+            <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold text-amber-200">
-                “Real Cash only — Real Money. Cash Winnings. And Withdrawals.”
+              <p className="font-bold text-cyan-200">
+                Authoritative Skill Gaming Wallet &amp; Ledger
               </p>
               <p className="text-[10px] text-slate-400 mt-0.5">
-                Top-up and play verified real cash matches. Transparent ledger balances and instant withdrawal support.
+                Participate in verified skill matches with immutable ledger records. Manual cash requests are reviewed and approved by administrators.
               </p>
             </div>
           </div>
@@ -292,15 +285,15 @@ export const WalletModal: React.FC<WalletModalProps> = ({
               <span>Top-Up</span>
             </button>
             <button
-              onClick={() => setActiveTab('withdraw')}
+              onClick={() => setActiveTab('request-cash')}
               className={`py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                activeTab === 'withdraw'
-                  ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                activeTab === 'request-cash'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md font-black'
                   : 'bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800'
               }`}
             >
-              <ArrowUpFromLine className="w-3.5 h-3.5" />
-              <span>Withdraw</span>
+              <Send className="w-3.5 h-3.5" />
+              <span>Cash Request</span>
             </button>
             <button
               onClick={() => setActiveTab('history')}
@@ -446,207 +439,114 @@ export const WalletModal: React.FC<WalletModalProps> = ({
           )}
 
           {/* =========================================================
-              TAB 2: WITHDRAWAL SYSTEM
+              TAB 2: MANUAL CASH ADDITION REQUESTS (No auto-credit)
               ========================================================= */}
-          {activeTab === 'withdraw' && (
+          {activeTab === 'request-cash' && (
             <div className="space-y-4">
-              {/* Withdrawal Limits Banner */}
-              <div className="p-2.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
-                <span className="font-semibold flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-amber-400" />
-                  Withdrawal Limits:
+              {/* Educational Rule Banner */}
+              <div className="p-3 rounded-2xl bg-cyan-950/30 border border-cyan-500/30 text-xs text-cyan-300 space-y-1">
+                <span className="font-bold flex items-center gap-1.5 text-cyan-200">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                  Manual Cash Request Review Policy
                 </span>
-                <span className="font-mono font-bold">
-                  Min ₹{settings.minWithdrawalInr} • Max ₹{settings.maxWithdrawalInr.toLocaleString()}
-                </span>
+                <p className="text-[11px] text-slate-300">
+                  Requests submitted here are held in <strong>Pending</strong> status until an administrator verifies the details. Submission <strong>NEVER automatically credits</strong> your account.
+                </p>
               </div>
 
-              {/* Withdrawal Request Form */}
-              <form onSubmit={handleSubmitWithdrawal} className="p-3.5 rounded-2xl bg-[#0f1d38]/80 border border-slate-800 space-y-3">
+              {/* Cash Request Form */}
+              <form onSubmit={handleSubmitCashRequest} className="p-4 rounded-2xl bg-[#0f1d38]/80 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                    Request Payout
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-cyan-400" />
+                    Request Real Cash Addition
                   </h3>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    Balance: {wallet.balance} Coins
+                    Current: {wallet.balance} Coins
                   </span>
                 </div>
 
-                {/* Amount to Withdraw */}
+                {/* Amount */}
                 <div>
                   <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                    Withdrawal Amount (INR)
+                    Requested Amount (Coins / INR)
                   </label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
-                        ₹
-                      </span>
-                      <input
-                        type="number"
-                        min={settings.minWithdrawalInr}
-                        max={Math.min(settings.maxWithdrawalInr, wallet.balance)}
-                        value={withdrawAmount}
-                        onChange={(e) => setWithdrawAmount(Number(e.target.value))}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-7 pr-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-amber-400"
-                        required
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setWithdrawAmount(Math.min(wallet.balance, settings.maxWithdrawalInr))}
-                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs rounded-xl"
-                    >
-                      MAX
-                    </button>
-                  </div>
-                </div>
-
-                {/* Method Selector: UPI vs Bank */}
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                    Payout Method
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setWithdrawMethod('upi')}
-                      className={`py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        withdrawMethod === 'upi'
-                          ? 'bg-amber-500 text-slate-950 font-black shadow'
-                          : 'bg-slate-900 text-slate-300 border border-slate-700'
-                      }`}
-                    >
-                      <Smartphone className="w-3.5 h-3.5" />
-                      <span>Instant UPI ID</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setWithdrawMethod('bank_transfer')}
-                      className={`py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                        withdrawMethod === 'bank_transfer'
-                          ? 'bg-amber-500 text-slate-950 font-black shadow'
-                          : 'bg-slate-900 text-slate-300 border border-slate-700'
-                      }`}
-                    >
-                      <Building className="w-3.5 h-3.5" />
-                      <span>Bank Account</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* UPI Fields */}
-                {withdrawMethod === 'upi' ? (
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                      UPI ID (VPA)
-                    </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      ₹
+                    </span>
                     <input
-                      type="text"
-                      placeholder="e.g. mobile@upi or username@okhdfcbank"
-                      value={upiId}
-                      onChange={(e) => setUpiId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                      type="number"
+                      min={10}
+                      max={100000}
+                      value={cashReqAmount}
+                      onChange={(e) => setCashReqAmount(Number(e.target.value))}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-7 pr-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-cyan-400"
                       required
                     />
                   </div>
-                ) : (
-                  /* Bank Fields */
-                  <div className="space-y-2">
-                    <div>
-                      <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                        Bank Account Number
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Enter full account number"
-                        value={bankAccountNumber}
-                        onChange={(e) => setBankAccountNumber(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
-                        required
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                          IFSC Code
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. SBIN0001234"
-                          value={ifscCode}
-                          onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white uppercase focus:outline-none focus:border-amber-400"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                          Bank Name
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. HDFC Bank"
-                          value={bankName}
-                          onChange={(e) => setBankName(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                </div>
 
-                {/* Account Holder Name */}
+                {/* Reason & Reference */}
                 <div>
                   <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                    Beneficiary Name
+                    Reason &amp; Transaction Proof
                   </label>
-                  <input
-                    type="text"
-                    placeholder="Full Name as on bank/UPI record"
-                    value={accountHolderName}
-                    onChange={(e) => setAccountHolderName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                  <textarea
+                    rows={3}
+                    placeholder="Enter UPI UTR, payment reference, or reason for requesting cash tokens..."
+                    value={cashReqReason}
+                    onChange={(e) => setCashReqReason(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 resize-none"
                     required
                   />
                 </div>
 
-                {withdrawError && <p className="text-xs text-rose-400 font-medium">{withdrawError}</p>}
-                {withdrawSuccess && <p className="text-xs text-emerald-400 font-medium">{withdrawSuccess}</p>}
+                {cashReqError && (
+                  <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs text-rose-300 font-medium">
+                    {cashReqError}
+                  </div>
+                )}
+                {cashReqSuccess && (
+                  <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-300 font-medium">
+                    {cashReqSuccess}
+                  </div>
+                )}
 
                 <button
                   type="submit"
-                  disabled={isSubmittingWithdrawal || wallet.balance < settings.minWithdrawalInr}
-                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs transition shadow-md active:scale-95"
+                  disabled={isSubmittingCashReq}
+                  className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-black text-xs transition shadow-md active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  {isSubmittingWithdrawal ? 'Submitting Request...' : `Submit Withdrawal (₹${withdrawAmount})`}
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isSubmittingCashReq ? 'Submitting...' : `Submit Request for ₹${cashReqAmount}`}</span>
                 </button>
               </form>
 
-              {/* Past Withdrawal Requests */}
+              {/* My Submitted Cash Requests */}
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  My Withdrawal Requests
+                  My Cash Addition Requests
                 </h3>
-                {withdrawals.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-4 bg-slate-900/50 rounded-2xl border border-slate-800">
-                    No withdrawal requests yet.
-                  </p>
+                {myCashRequests.length === 0 ? (
+                  <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800 text-center">
+                    <p className="text-xs text-slate-500">No cash addition requests submitted yet.</p>
+                  </div>
                 ) : (
                   <div className="space-y-2">
-                    {withdrawals.map((w) => {
-                      const isPending = w.status === 'pending';
-                      const isApproved = w.status === 'approved';
+                    {myCashRequests.map((req) => {
+                      const isPending = req.status === 'pending';
+                      const isApproved = req.status === 'approved';
 
                       return (
                         <div
-                          key={w.id}
-                          className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs"
+                          key={req.id}
+                          className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-start justify-between gap-3 text-xs"
                         >
-                          <div>
-                            <div className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-1">
                               <span className="font-mono font-bold text-white text-sm">
-                                ₹{w.amountInr}
+                                ₹{req.requestedAmount}
                               </span>
                               <span
                                 className={`text-[10px] uppercase font-black px-2 py-0.5 rounded-full border ${
@@ -657,21 +557,28 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                                     : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
                                 }`}
                               >
-                                {w.status}
+                                {req.status}
                               </span>
+                              {req.approvedAmount !== undefined && (
+                                <span className="text-[11px] text-emerald-400 font-mono font-bold">
+                                  Approved: ₹{req.approvedAmount}
+                                </span>
+                              )}
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5">
-                              {w.payoutMethod.toUpperCase()}:{' '}
-                              {w.payoutDetails.upiId || w.payoutDetails.bankAccountNumber}
+
+                            <p className="text-[11px] text-slate-300 leading-relaxed break-words">
+                              {req.reason}
                             </p>
-                            {w.adminNotes && (
-                              <p className="text-[10px] text-slate-400 italic mt-0.5">
-                                Note: {w.adminNotes}
+
+                            {req.adminNote && (
+                              <p className="text-[10px] text-cyan-300 italic mt-1 bg-cyan-950/40 p-1.5 rounded-lg border border-cyan-800/40">
+                                <strong>Admin Note:</strong> {req.adminNote}
                               </p>
                             )}
                           </div>
-                          <span className="text-[10px] text-slate-500">
-                            {new Date(w.createdAt).toLocaleDateString()}
+
+                          <span className="text-[10px] text-slate-500 shrink-0 font-mono">
+                            {new Date(req.createdAt).toLocaleDateString()}
                           </span>
                         </div>
                       );
@@ -689,7 +596,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             <div className="space-y-3">
               {/* Filter Tabs */}
               <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs">
-                {(['all', 'deposit', 'withdrawal', 'bonus'] as const).map((filter) => (
+                {(['all', 'deposit', 'game', 'bonus'] as const).map((filter) => (
                   <button
                     key={filter}
                     onClick={() => setHistoryFilter(filter)}

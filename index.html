@@ -5,27 +5,126 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <script>
       // Gracefully handle/ignore Vite HMR WebSocket connection events in Cloud Run preview iframe
-      window.addEventListener('error', function(event) {
-        var msg = (event.message || '') + ' ' + (event.error ? event.error.message : '');
-        if (msg.includes('WebSocket') || msg.includes('ws://') || msg.includes('wss://')) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          return true;
+      (function() {
+        if (typeof window !== 'undefined') {
+          var OrigWebSocket = window.WebSocket;
+          if (OrigWebSocket) {
+            function MockHmrWebSocket(url, protocols) {
+              var isHmr = false;
+              if (typeof protocols === 'string' && protocols === 'vite-hmr') isHmr = true;
+              else if (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1) isHmr = true;
+              else if (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('token=') !== -1)) isHmr = true;
+
+              if (isHmr) {
+                var listeners = {};
+                var wsInstance = {
+                  url: String(url || ''),
+                  protocol: 'vite-hmr',
+                  readyState: 1, // WebSocket.OPEN
+                  CONNECTING: 0,
+                  OPEN: 1,
+                  CLOSING: 2,
+                  CLOSED: 3,
+                  binaryType: 'blob',
+                  bufferedAmount: 0,
+                  extensions: '',
+                  onopen: null,
+                  onclose: null,
+                  onerror: null,
+                  onmessage: null,
+                  addEventListener: function(type, fn) {
+                    if (!listeners[type]) listeners[type] = [];
+                    listeners[type].push(fn);
+                    if (type === 'open') {
+                      setTimeout(function() {
+                        try {
+                          fn({ type: 'open', target: wsInstance });
+                        } catch(e) {}
+                      }, 0);
+                    }
+                  },
+                  removeEventListener: function(type, fn) {
+                    if (!listeners[type]) return;
+                    listeners[type] = listeners[type].filter(function(cb) { return cb !== fn; });
+                  },
+                  dispatchEvent: function(event) {
+                    var type = event && event.type;
+                    if (type && listeners[type]) {
+                      listeners[type].forEach(function(cb) {
+                        try { cb(event); } catch(e) {}
+                      });
+                    }
+                    return true;
+                  },
+                  send: function() {},
+                  close: function() {
+                    wsInstance.readyState = 3; // CLOSED
+                  }
+                };
+
+                setTimeout(function() {
+                  if (typeof wsInstance.onopen === 'function') {
+                    try {
+                      wsInstance.onopen({ type: 'open', target: wsInstance });
+                    } catch(e) {}
+                  }
+                }, 0);
+
+                return wsInstance;
+              }
+
+              return new OrigWebSocket(url, protocols);
+            }
+
+            MockHmrWebSocket.CONNECTING = OrigWebSocket.CONNECTING;
+            MockHmrWebSocket.OPEN = OrigWebSocket.OPEN;
+            MockHmrWebSocket.CLOSING = OrigWebSocket.CLOSING;
+            MockHmrWebSocket.CLOSED = OrigWebSocket.CLOSED;
+            MockHmrWebSocket.prototype = OrigWebSocket.prototype;
+            window.WebSocket = MockHmrWebSocket;
+          }
+
+          var origConsoleError = console.error;
+          console.error = function() {
+            var args = Array.prototype.slice.call(arguments);
+            var msg = args.map(function(a) {
+              return String((a && a.message) || (a && a.stack) || a || '');
+            }).join(' ');
+            if (
+              msg.indexOf('WebSocket') !== -1 ||
+              msg.indexOf('[vite]') !== -1 ||
+              msg.indexOf('ws://') !== -1 ||
+              msg.indexOf('wss://') !== -1
+            ) {
+              return;
+            }
+            return origConsoleError.apply(console, args);
+          };
+
+          window.addEventListener('error', function(event) {
+            var msg = (event.message || '') + ' ' + (event.error ? (event.error.message || event.error.stack || '') : '');
+            if (msg.includes('WebSocket') || msg.includes('[vite]') || msg.includes('ws://') || msg.includes('wss://')) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return true;
+            }
+          }, true);
+
+          window.addEventListener('unhandledrejection', function(event) {
+            var msg = String(event.reason && (event.reason.message || event.reason.stack) ? (event.reason.message || event.reason.stack) : event.reason || '');
+            if (msg.includes('WebSocket') || msg.includes('[vite]') || msg.includes('ws://') || msg.includes('wss://')) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return true;
+            }
+          }, true);
         }
-      }, true);
-      window.addEventListener('unhandledrejection', function(event) {
-        var msg = String(event.reason && event.reason.message ? event.reason.message : event.reason || '');
-        if (msg.includes('WebSocket') || msg.includes('ws://') || msg.includes('wss://')) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          return true;
-        }
-      }, true);
+      })();
     </script>
-    <title>Cricket Arena — Online Skill Games • Top-up and Play • Real Cash Games</title>
-    <meta name="description" content="Cricket Arena: India’s trusted skill gaming platform. Play online real cash Ludo tables, join cricket skill tournaments, and experience secure, verified online gaming." />
-    <meta property="og:title" content="Cricket Arena — Online Skill Games • Top-up and Play • Real Cash Games" />
-    <meta property="og:description" content="Cricket Arena: India’s trusted skill gaming platform. Play online real cash Ludo tables, join cricket skill tournaments, and experience secure, verified online gaming." />
+    <title>Cricket Arena</title>
+    <meta name="description" content="Mobile-first cricket tournament PWA. Join free tournaments, create virtual teams, track leaderboard rankings, and explore cricket statistics." />
+    <meta property="og:title" content="Cricket Arena" />
+    <meta property="og:description" content="Mobile-first cricket tournament PWA. Join free tournaments, create virtual teams, track leaderboard rankings, and explore cricket statistics." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#0a0f1d" />

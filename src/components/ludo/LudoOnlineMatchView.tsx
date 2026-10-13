@@ -17,6 +17,7 @@ import { LudoColor, LudoGameState } from '../../types';
 import { LudoCashMatch, LudoOnlinePlayer } from '../../types/ludoCash';
 import { LudoBoard } from './LudoBoard';
 import { LudoDice } from './LudoDice';
+import { LudoSimulationBanner } from './LudoSimulationBanner';
 import { playLudoSound, capitalize } from '../../lib/ludoEngine';
 import { useAuth } from '../../context/AuthContext';
 import { useWallet } from '../../context/WalletContext';
@@ -100,6 +101,13 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
   // Handle Game Over settlement
   useEffect(() => {
     if (!match || match.status !== 'completed' || !match.gameState.isGameOver || hasSettledReward) return;
+
+    // Simulation Isolation: Never award real money for QA simulation matches
+    if ((match as any).isSimulation) {
+      setHasSettledReward(true);
+      triggerSound('win');
+      return;
+    }
 
     if (user && match.winnerId === user.id) {
       // Current user WON the real cash prize!
@@ -248,6 +256,14 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
 
   return (
     <div className="flex flex-col items-center w-full max-w-lg mx-auto pb-24 px-2 space-y-3">
+      {/* QA Simulation Notice Banner */}
+      {(match as any).isSimulation && (
+        <LudoSimulationBanner
+          simulatedOutcome={(match as any).simulatedOutcome}
+          testTokenStake={(match as any).testTokenStake || 50}
+        />
+      )}
+
       {/* Top Match Stakes Banner */}
       <div className="w-full bg-[#0a1128] rounded-2xl border border-blue-500/40 p-3 shadow-xl">
         <div className="flex items-center justify-between">
@@ -345,7 +361,7 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
               <LudoDice
                 playerColor="red"
                 playerName={
-                  match.players.find((p) => p.color === 'red')?.userName || 'Red Player'
+                  match.players.find((p) => p.color === 'red')?.userName.replace(' [BOT]', '') || 'Red Player'
                 }
                 diceValue={
                   gameState.currentTurn === 'red' && gameState.hasRolled
@@ -371,7 +387,7 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
               <LudoDice
                 playerColor="green"
                 playerName={
-                  match.players.find((p) => p.color === 'green')?.userName || 'Green Player'
+                  match.players.find((p) => p.color === 'green')?.userName.replace(' [BOT]', '') || 'Green Player'
                 }
                 diceValue={
                   gameState.currentTurn === 'green' && gameState.hasRolled
@@ -408,7 +424,7 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
               <LudoDice
                 playerColor="blue"
                 playerName={
-                  match.players.find((p) => p.color === 'blue')?.userName || 'Blue Player'
+                  match.players.find((p) => p.color === 'blue')?.userName.replace(' [BOT]', '') || 'Blue Player'
                 }
                 diceValue={
                   gameState.currentTurn === 'blue' && gameState.hasRolled
@@ -434,7 +450,7 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
               <LudoDice
                 playerColor="yellow"
                 playerName={
-                  match.players.find((p) => p.color === 'yellow')?.userName || 'Yellow Player'
+                  match.players.find((p) => p.color === 'yellow')?.userName.replace(' [BOT]', '') || 'Yellow Player'
                 }
                 diceValue={
                   gameState.currentTurn === 'yellow' && gameState.hasRolled
@@ -482,8 +498,13 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
                   }`}
                 />
                 <span className="text-white text-[11px] truncate max-w-[80px]">
-                  {p.userName} {isMe && '(You)'}
+                  {p.userName.replace(' [BOT]', '')} {isMe && '(You)'}
                 </span>
+                {(match as any).isSimulation && (p.userName.includes('[BOT]') || p.userId.startsWith('bot-') || (p as any).isSimulated) && (
+                  <span className="text-[9px] font-black uppercase text-purple-300 bg-purple-950 px-1 py-0.2 rounded border border-purple-500/40">
+                    [BOT]
+                  </span>
+                )}
               </div>
               <span className="text-[10px] text-slate-400 uppercase font-mono mt-0.5">
                 {capitalize(p.color)}
@@ -494,7 +515,7 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
       </div>
 
       {/* ========================================================
-          WINNER CELEBRATION MODAL (REAL CASH SETTLEMENT)
+          WINNER CELEBRATION MODAL (REAL CASH OR QA SIMULATION)
           ======================================================== */}
       {gameState.isGameOver && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
@@ -505,28 +526,45 @@ export const LudoOnlineMatchView: React.FC<LudoOnlineMatchViewProps> = ({
 
             <div>
               <span className="text-[10px] font-black uppercase text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-500/40">
-                MATCH COMPLETED
+                {(match as any).isSimulation ? 'QA SIMULATION COMPLETE' : 'MATCH COMPLETED'}
               </span>
               <h2 className="text-xl font-black text-white mt-1">
                 {match.winnerId === user?.id ? '🎉 You Won!' : `${match.winnerName} Won!`}
               </h2>
               <p className="text-xs text-slate-300 mt-0.5">
-                {match.winnerId === user?.id
+                {(match as any).isSimulation
+                  ? 'QA Simulation finished successfully. All game rules and dice turns were evaluated.'
+                  : match.winnerId === user?.id
                   ? 'Congratulations! Your real cash prize has been credited to your wallet.'
                   : 'Better luck next match! Keep rolling and competing.'}
               </p>
             </div>
 
-            {/* Winning Prize Display */}
-            <div className="bg-slate-950/90 rounded-2xl p-4 border border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400 uppercase font-bold">1st Prize Reward</span>
-              <div className="font-mono text-2xl font-black text-emerald-400">
-                ₹{match.prizeAmount.toLocaleString('en-IN')}
+            {/* Winning Prize Display or Simulation Notice */}
+            {(match as any).isSimulation ? (
+              <div className="bg-amber-950/80 rounded-2xl p-3.5 border border-amber-500/60 space-y-1.5 text-left">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-amber-300 uppercase font-black">Simulation Test Mode</span>
+                  <span className="text-[10px] font-mono text-emerald-400 font-bold">50 TEST TOKENS</span>
+                </div>
+                <div className="font-mono text-sm font-black text-white">
+                  Result: {match.winnerName}
+                </div>
+                <p className="text-[10px] text-amber-200/90 leading-tight">
+                  ⚠️ <strong>NOT A REAL MATCH:</strong> Isolated QA data only. Zero real cash was deducted or awarded. No real wallet or Supabase state was changed.
+                </p>
               </div>
-              <p className="text-[10px] text-slate-500">
-                Ref ID: LUDO-MATCH-{match.id}
-              </p>
-            </div>
+            ) : (
+              <div className="bg-slate-950/90 rounded-2xl p-4 border border-slate-800 space-y-1">
+                <span className="text-xs text-slate-400 uppercase font-bold">1st Prize Reward</span>
+                <div className="font-mono text-2xl font-black text-emerald-400">
+                  ₹{match.prizeAmount.toLocaleString('en-IN')}
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  Ref ID: LUDO-MATCH-{match.id}
+                </p>
+              </div>
+            )}
 
             <button
               onClick={onExit}

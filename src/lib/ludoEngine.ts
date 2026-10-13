@@ -125,10 +125,10 @@ export function createInitialLudoGame(playerCount: 2 | 4): LudoGameState {
   const players: LudoColor[] = playerCount === 2 ? ['red', 'yellow'] : ['red', 'green', 'yellow', 'blue'];
 
   const createTokens = (color: LudoColor): LudoToken[] => [
-    { id: 0, color, step: -1 },
-    { id: 1, color, step: -1 },
-    { id: 2, color, step: -1 },
-    { id: 3, color, step: -1 },
+    { id: 0, color, step: -1, score: 0, reachedHome: false },
+    { id: 1, color, step: -1, score: 0, reachedHome: false },
+    { id: 2, color, step: -1, score: 0, reachedHome: false },
+    { id: 3, color, step: -1, score: 0, reachedHome: false },
   ];
 
   const tokens: Record<LudoColor, LudoToken[]> = {
@@ -136,6 +136,13 @@ export function createInitialLudoGame(playerCount: 2 | 4): LudoGameState {
     green: createTokens('green'),
     yellow: createTokens('yellow'),
     blue: createTokens('blue'),
+  };
+
+  const initialScores: Record<LudoColor, number> = {
+    red: 0,
+    green: 0,
+    yellow: 0,
+    blue: 0,
   };
 
   return {
@@ -151,6 +158,7 @@ export function createInitialLudoGame(playerCount: 2 | 4): LudoGameState {
     lastActionText: `${capitalize(players[0])}'s turn to roll!`,
     extraTurn: false,
     highlightedTokenIds: [],
+    scores: initialScores,
   };
 }
 

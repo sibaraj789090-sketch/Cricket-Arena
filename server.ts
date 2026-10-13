@@ -1,9 +1,19 @@
+// Explicitly disable HMR in AI Studio container preview environment
+process.env.DISABLE_HMR = 'true';
+
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { ludoRouter } from './src/server/ludoMatchServer';
+import { ludoBotRouter } from './src/server/ludoBotRouter';
+import {
+  serverCashRequests,
+  serverPlayerRestrictions,
+  checkUserBanStatus,
+} from './src/server/adminControlServer';
+import { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +26,10 @@ app.use(express.json());
 
 // Mount Authoritative Online Ludo Multiplayer Router
 app.use('/api/ludo', ludoRouter);
+
+// Mount Ludo Virtual Bots & QA Simulation Router (Temporary pre-launch feature)
+app.use('/api/admin/bots', ludoBotRouter);
+app.use('/api/ludo/bots', ludoBotRouter);
 
 // In-memory server-side audit logs & score locks
 interface ServerAuditLog {
@@ -79,6 +93,16 @@ app.get('/api/admin/audit-logs', requireAdminRole, (req: Request, res: Response)
 // Validate & Create Virtual Team on the server
 app.post('/api/teams/validate-and-create', (req: Request, res: Response) => {
   const { tournamentId, userId, teamName, playerIds, captainId, viceCaptainId, squadCredits } = req.body;
+
+  // Server-side Player Ban & Blacklist Enforcement
+  if (userId) {
+    const banCheck = checkUserBanStatus(userId, 'all');
+    if (banCheck.banned) {
+      return res.status(403).json({
+        error: `Access Denied: Your account is restricted (${banCheck.reason || 'Restricted by administrator'}).`,
+      });
+    }
+  }
 
   if (!teamName || typeof teamName !== 'string' || teamName.trim().length < 3) {
     return res.status(400).json({ error: 'Team name must be at least 3 characters long.' });
@@ -510,75 +534,334 @@ app.post('/api/admin/wallet/packages', requireAdminRole, (req: Request, res: Res
   res.json({ success: true, packages: serverCoinPackages });
 });
 
-// Server-side Withdrawal Request Verification
+// ==========================================
+// MANUAL CASH ADDITION REQUESTS & BANS SYSTEM
+// (Withdrawal functionality removed; pure skill gaming credits)
+// ==========================================
+
+// Prohibit Withdrawal Requests
 app.post('/api/wallet/request-withdrawal', (req: Request, res: Response) => {
-  const { userId, userName, userEmail, amountInr, payoutMethod, payoutDetails } = req.body;
-
-  if (!userId || !amountInr || !payoutMethod) {
-    return res.status(400).json({ error: 'Missing required withdrawal fields.' });
-  }
-
-  const amt = Number(amountInr);
-  if (isNaN(amt) || amt < serverWalletSettings.minWithdrawalInr) {
-    return res.status(400).json({ error: `Minimum withdrawal is ₹${serverWalletSettings.minWithdrawalInr}.` });
-  }
-  if (amt > serverWalletSettings.maxWithdrawalInr) {
-    return res.status(400).json({ error: `Maximum withdrawal is ₹${serverWalletSettings.maxWithdrawalInr}.` });
-  }
-
-  const requestId = `wdr-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-  const referenceId = `WDR-REF-${Date.now()}`;
-
-  const auditEntry: ServerAuditLog = {
-    id: `audit-wdr-${Date.now()}`,
-    adminId: 'system',
-    adminName: userName || 'Arena Player',
-    action: 'WITHDRAWAL_REQUESTED',
-    targetType: 'wallet',
-    targetId: userId,
-    details: `Withdrawal request submitted for ₹${amt} via ${String(payoutMethod).toUpperCase()}. Pending admin verification.`,
-    timestamp: new Date().toISOString(),
-  };
-  serverAuditLogs.unshift(auditEntry);
-
-  res.json({
-    success: true,
-    requestId,
-    referenceId,
-    amountInr: amt,
-    amountCoins: amt,
-    status: 'pending',
-    message: 'Withdrawal request verified and submitted for administrative approval.',
+  return res.status(400).json({
+    error: 'Withdrawals are not supported on this platform. Real Cash coins are non-redeemable skill gaming credits.',
+    success: false,
   });
 });
 
-// Admin Process Withdrawal (Approve or Reject with Refund)
-app.post('/api/admin/wallet/withdrawal/action', requireAdminRole, (req: Request, res: Response) => {
-  const { requestId, action, adminNotes = '', payoutReferenceId = '', adminName = 'Finance Admin' } = req.body;
+// User Submits Manual Cash Addition Request (NEVER auto-credited)
+app.post('/api/wallet/cash-request', (req: Request, res: Response) => {
+  const { userId, userName, requestedAmount, reason } = req.body;
 
-  if (!requestId || !['approve', 'reject'].includes(action)) {
-    return res.status(400).json({ error: 'Valid requestId and action (approve/reject) required.' });
+  if (!userId || !requestedAmount || !reason) {
+    return res.status(400).json({ error: 'User ID, requested amount, and reason are required.' });
   }
 
+  // Enforce ban check
+  const banStatus = checkUserBanStatus(userId, 'all');
+  if (banStatus.banned) {
+    return res.status(403).json({
+      error: `Your account is restricted (${banStatus.reason || 'Restricted by administrator'}). Cannot submit requests.`,
+    });
+  }
+
+  const amt = Number(requestedAmount);
+  if (isNaN(amt) || amt <= 0) {
+    return res.status(400).json({ error: 'Requested amount must be greater than zero.' });
+  }
+
+  const requestId = `req-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+  const newRequest: CashAdditionRequest = {
+    id: requestId,
+    userId,
+    userName: userName || 'Arena Player',
+    requestedAmount: Math.floor(amt),
+    reason: String(reason).trim(),
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  serverCashRequests.set(requestId, newRequest);
+
   serverAuditLogs.unshift({
-    id: `audit-act-${Date.now()}`,
-    adminId: 'admin-master',
-    adminName,
-    action: action === 'approve' ? 'WITHDRAWAL_APPROVED' : 'WITHDRAWAL_REJECTED',
-    targetType: 'withdrawal_request',
+    id: `audit-req-${Date.now()}`,
+    adminId: 'system',
+    adminName: newRequest.userName,
+    action: 'CASH_REQUEST_SUBMITTED',
+    targetType: 'cash_request',
     targetId: requestId,
-    details: action === 'approve'
-      ? `Approved withdrawal ${requestId}. Payout reference: ${payoutReferenceId || 'N/A'}. Notes: ${adminNotes}`
-      : `Rejected withdrawal ${requestId}. Coins refunded to player balance. Notes: ${adminNotes}`,
+    details: `User submitted request for ₹${newRequest.requestedAmount} coins. Reason: ${newRequest.reason}`,
     timestamp: new Date().toISOString(),
   });
 
   res.json({
     success: true,
-    action,
-    requestId,
-    message: `Withdrawal ${action}d successfully on server.`,
+    request: newRequest,
+    message: 'Cash addition request submitted for administrative review. Wallet was not credited.',
   });
+});
+
+// User Views Own Cash Addition Requests
+app.get('/api/wallet/cash-requests/:userId', (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const userRequests: CashAdditionRequest[] = [];
+
+  for (const r of serverCashRequests.values()) {
+    if (r.userId === userId) {
+      userRequests.push(r);
+    }
+  }
+
+  userRequests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json({ success: true, requests: userRequests });
+});
+
+// Admin Views All Cash Addition Requests
+app.get('/api/admin/cash-requests', requireAdminRole, (req: Request, res: Response) => {
+  const { status, query } = req.query;
+  let requests = Array.from(serverCashRequests.values());
+
+  if (status && status !== 'all') {
+    requests = requests.filter((r) => r.status === status);
+  }
+
+  if (query && typeof query === 'string') {
+    const q = query.toLowerCase().trim();
+    requests = requests.filter(
+      (r) =>
+        r.id.toLowerCase().includes(q) ||
+        r.userId.toLowerCase().includes(q) ||
+        r.userName.toLowerCase().includes(q) ||
+        r.reason.toLowerCase().includes(q)
+    );
+  }
+
+  requests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json({ success: true, requests });
+});
+
+// Admin Decides on Cash Request (Approve or Reject - EXACTLY ONCE)
+app.post('/api/admin/cash-requests/action', requireAdminRole, (req: Request, res: Response) => {
+  const { requestId, action, approvedAmount, adminNote = '', adminId = 'admin-master', adminName = 'Official Admin' } = req.body;
+
+  if (!requestId || !['approve', 'reject'].includes(action)) {
+    return res.status(400).json({ error: 'Valid requestId and action (approve/reject) are required.' });
+  }
+
+  const request = serverCashRequests.get(requestId);
+  if (!request) {
+    return res.status(404).json({ error: 'Cash request not found.' });
+  }
+
+  // Idempotency check: exactly-once decision
+  if (request.status !== 'pending') {
+    return res.status(400).json({
+      error: `Request has already been processed with status: ${request.status}. Duplicate processing prevented.`,
+      alreadyProcessed: true,
+    });
+  }
+
+  // Self-approval prohibition
+  if (adminId && adminId === request.userId) {
+    return res.status(403).json({ error: 'Security violation: Administrators cannot approve their own cash requests.' });
+  }
+
+  if (action === 'approve') {
+    const amt = approvedAmount !== undefined ? Number(approvedAmount) : request.requestedAmount;
+    if (isNaN(amt) || amt <= 0) {
+      return res.status(400).json({ error: 'Approved amount must be greater than zero.' });
+    }
+
+    request.status = 'approved';
+    request.approvedAmount = amt;
+    request.adminNote = String(adminNote).trim();
+    request.processedBy = adminId;
+    request.processedByName = adminName;
+    request.processedAt = new Date().toISOString();
+
+    // Immutable audit log
+    serverAuditLogs.unshift({
+      id: `audit-appv-${Date.now()}`,
+      adminId,
+      adminName,
+      action: 'CASH_REQUEST_APPROVED',
+      targetType: 'cash_request',
+      targetId: requestId,
+      details: `Approved ₹${amt} coins for ${request.userName} (UID: ${request.userId}). Note: ${request.adminNote || 'Approved'}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      request,
+      creditedCoins: amt,
+      message: `Approved and credited ₹${amt} game coins to ${request.userName}.`,
+    });
+  } else {
+    // Reject request: zero balance alteration
+    request.status = 'rejected';
+    request.adminNote = String(adminNote).trim() || 'Request rejected by administration.';
+    request.processedBy = adminId;
+    request.processedByName = adminName;
+    request.processedAt = new Date().toISOString();
+
+    serverAuditLogs.unshift({
+      id: `audit-rej-${Date.now()}`,
+      adminId,
+      adminName,
+      action: 'CASH_REQUEST_REJECTED',
+      targetType: 'cash_request',
+      targetId: requestId,
+      details: `Rejected cash request of ₹${request.requestedAmount} for ${request.userName}. Reason: ${request.adminNote}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      request,
+      message: `Cash request rejected with zero wallet balance modification.`,
+    });
+  }
+});
+
+// Admin Player Management & Directory
+app.get('/api/admin/players', requireAdminRole, (req: Request, res: Response) => {
+  const { query } = req.query;
+
+  // Base list of players from directory and active records
+  const samplePlayers = [
+    { userId: 'user-demo-1', userName: 'Rajesh_Sharma', email: 'rajesh@arena.in', registeredAt: '2026-08-15T00:00:00.000Z', matches: 14, wins: 9, losses: 5 },
+    { userId: 'usr-rohit-88', userName: 'Rohit_Sharma_99', email: 'rohit@skillarena.in', registeredAt: '2026-09-01T00:00:00.000Z', matches: 38, wins: 26, losses: 12 },
+    { userId: 'usr-vikram-07', userName: 'Vikram_Rathore', email: 'vikram.r@gmail.com', registeredAt: '2026-09-10T00:00:00.000Z', matches: 21, wins: 14, losses: 7 },
+    { userId: 'usr-priya-k', userName: 'Priya_LudoQueen', email: 'priya.k@yahoo.in', registeredAt: '2026-09-14T00:00:00.000Z', matches: 45, wins: 31, losses: 14 },
+    { userId: 'usr-aman-singh', userName: 'Aman_Striker', email: 'aman.singh@gmail.com', registeredAt: '2026-09-20T00:00:00.000Z', matches: 19, wins: 11, losses: 8 },
+    { userId: 'usr-suspicious-99', userName: 'SpeedHacker_99', email: 'hacker99@anonymous.io', registeredAt: '2026-10-01T00:00:00.000Z', matches: 8, wins: 8, losses: 0 },
+    { userId: 'usr-quitter-12', userName: 'RageQuitter_Pro', email: 'quitter@test.com', registeredAt: '2026-10-05T00:00:00.000Z', matches: 15, wins: 2, losses: 13 },
+  ];
+
+  let players = samplePlayers.map((sp) => {
+    const restriction = Array.from(serverPlayerRestrictions.values()).find(
+      (r) => r.userId === sp.userId && r.status === 'active'
+    );
+    const pendingRequests = Array.from(serverCashRequests.values()).filter(
+      (r) => r.userId === sp.userId && r.status === 'pending'
+    ).length;
+
+    return {
+      userId: sp.userId,
+      userName: sp.userName,
+      email: sp.email,
+      registeredAt: sp.registeredAt,
+      balance: 250,
+      lockedBalance: 0,
+      totalMatchesPlayed: sp.matches,
+      wins: sp.wins,
+      losses: sp.losses,
+      pendingCashRequestsCount: pendingRequests,
+      restriction,
+    };
+  });
+
+  if (query && typeof query === 'string') {
+    const q = query.toLowerCase().trim();
+    players = players.filter(
+      (p) => p.userId.toLowerCase().includes(q) || p.userName.toLowerCase().includes(q) || (p.email && p.email.toLowerCase().includes(q))
+    );
+  }
+
+  res.json({ success: true, players });
+});
+
+// Admin Bans & Restricts Player
+app.post('/api/admin/players/restrict', requireAdminRole, (req: Request, res: Response) => {
+  const { userId, userName, restrictionType, reason, internalNote = '', durationHours, adminId = 'admin-master', adminName = 'Official Admin' } = req.body;
+
+  if (!userId || !restrictionType || !reason) {
+    return res.status(400).json({ error: 'User ID, restriction type, and reason are required.' });
+  }
+
+  // Lift any existing active restrictions for this user first
+  for (const r of serverPlayerRestrictions.values()) {
+    if (r.userId === userId && r.status === 'active') {
+      r.status = 'lifted';
+      r.liftedAt = new Date().toISOString();
+      r.liftedBy = adminId;
+    }
+  }
+
+  let expiresAt: string | undefined = undefined;
+  if (restrictionType === 'temp_suspend' && durationHours) {
+    expiresAt = new Date(Date.now() + Number(durationHours) * 3600 * 1000).toISOString();
+  }
+
+  const restrictionId = `res-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+  const newRestriction: PlayerRestriction = {
+    id: restrictionId,
+    userId,
+    userName: userName || `Player_${userId.slice(-4)}`,
+    restrictionType: restrictionType as RestrictionType,
+    status: 'active',
+    reason: String(reason).trim(),
+    internalNote: String(internalNote).trim(),
+    adminId,
+    adminName,
+    expiresAt,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  serverPlayerRestrictions.set(restrictionId, newRestriction);
+
+  serverAuditLogs.unshift({
+    id: `audit-ban-${Date.now()}`,
+    adminId,
+    adminName,
+    action: `PLAYER_${restrictionType.toUpperCase()}`,
+    targetType: 'player_restriction',
+    targetId: userId,
+    details: `Applied ${restrictionType} to ${newRestriction.userName} (UID: ${userId}). Reason: ${newRestriction.reason}. ${expiresAt ? `Expires: ${expiresAt}` : 'Permanent'}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  res.json({ success: true, restriction: newRestriction, message: `Restriction ${restrictionType} applied to user ${userId}.` });
+});
+
+// Admin Lifts Player Ban / Unbans
+app.post('/api/admin/players/unban', requireAdminRole, (req: Request, res: Response) => {
+  const { userId, reason = 'Unbanned by admin', adminId = 'admin-master', adminName = 'Official Admin' } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required.' });
+  }
+
+  let liftedCount = 0;
+  for (const r of serverPlayerRestrictions.values()) {
+    if (r.userId === userId && r.status === 'active') {
+      r.status = 'lifted';
+      r.liftedAt = new Date().toISOString();
+      r.liftedBy = adminId;
+      liftedCount++;
+    }
+  }
+
+  serverAuditLogs.unshift({
+    id: `audit-unban-${Date.now()}`,
+    adminId,
+    adminName,
+    action: 'PLAYER_RESTRICTION_LIFTED',
+    targetType: 'player_restriction',
+    targetId: userId,
+    details: `Lifted restrictions for player UID ${userId}. Notes: ${reason}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  res.json({ success: true, liftedCount, message: `Access restored for user UID ${userId}.` });
+});
+
+// Admin Views All Bans & Blacklist History
+app.get('/api/admin/bans', requireAdminRole, (req: Request, res: Response) => {
+  const list = Array.from(serverPlayerRestrictions.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  res.json({ success: true, restrictions: list });
 });
 
 // Admin Manual Balance Adjustment

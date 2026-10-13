@@ -157,9 +157,14 @@ export async function join_table(
       });
 
       if (error) {
-        // If the error is PGRST202/PGRST203 (ambiguous overload or schema cache pending)
-        // or a network error, log a clear diagnostic and fallback to authoritative local store
-        if (
+        // If the error is network, fetch failure, or RPC ambiguity/schema cache pending,
+        // log a warning diagnostic and seamlessly fallback to authoritative local store
+        const isNetworkOrUnavailable =
+          !error.code ||
+          error.message?.includes('Failed to fetch') ||
+          error.message?.includes('fetch') ||
+          error.message?.includes('NetworkError') ||
+          error.message?.includes('network') ||
           error.code === 'PGRST202' ||
           error.code === 'PGRST203' ||
           error.code === 'PGRST205' ||
@@ -168,15 +173,17 @@ export async function join_table(
           error.message?.includes('schema cache') ||
           error.message?.includes('best candidate') ||
           error.message?.includes('ambiguous') ||
-          error.message?.includes('not found')
-        ) {
+          error.message?.includes('not found');
+
+        if (isNetworkOrUnavailable) {
           console.warn(
-            '[LudoServerActions] Supabase RPC schema cache/overload ambiguity pending migration. Falling back to authoritative store:',
-            error.message
+            '[LudoServerActions] Supabase RPC unavailable or network offline. Falling back to authoritative store:',
+            error.message || 'network unavailable'
           );
+          // Fall through to Step 3 below
         } else {
-          // If stored procedure returned an explicit database exception (e.g. invalid status, full table)
-          console.error('[LudoServerActions] Supabase rpc_ludo_join_table_reserve rejected:', error);
+          // If stored procedure returned an explicit business logic exception
+          console.warn('[LudoServerActions] Supabase rpc_ludo_join_table_reserve rejected:', error.message);
           return {
             success: false,
             error: error.message || 'Database rejected entry fee reservation.',

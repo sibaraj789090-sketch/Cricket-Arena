@@ -14,9 +14,20 @@ import {
   Edit,
   ArrowRight,
   Coins,
+  Ban,
+  Zap,
+  FileText,
+  UserCheck,
+  Bot,
 } from 'lucide-react';
 import { AdminWalletSection } from './AdminWalletSection';
 import { AdminLudoTablesSection } from './AdminLudoTablesSection';
+import { AdminCashRequestsSection } from './AdminCashRequestsSection';
+import { AdminPlayersSection } from './AdminPlayersSection';
+import { AdminBansSection } from './AdminBansSection';
+import { AdminActiveMatchesSection } from './AdminActiveMatchesSection';
+import { AdminBotsSection } from './AdminBotsSection';
+import { AdminDataStore } from '../../lib/adminDataStore';
 import { useAuth } from '../../context/AuthContext';
 import { useTournament } from '../../context/TournamentContext';
 import {
@@ -51,7 +62,54 @@ export const AdminDashboard: React.FC = () => {
     refreshData,
   } = useTournament();
 
-  const [adminTab, setAdminTab] = useState<'scores' | 'tournaments' | 'ludo-tables' | 'ludo' | 'wallet' | 'roster' | 'points' | 'audit' | 'participants'>('ludo-tables');
+  const [adminTab, setAdminTab] = useState<
+    | 'ludo-tables'
+    | 'bots'
+    | 'cash-requests'
+    | 'players'
+    | 'bans'
+    | 'active-matches'
+    | 'wallet'
+    | 'scores'
+    | 'tournaments'
+    | 'ludo'
+    | 'roster'
+    | 'points'
+    | 'audit'
+    | 'participants'
+  >('ludo-tables');
+
+  // Dynamic Badges for Admin Tabs
+  const [pendingCashCount, setPendingCashCount] = useState<number>(() =>
+    AdminDataStore.getCashRequests().filter((r) => r.status === 'pending').length
+  );
+  const [bannedPlayersCount, setBannedPlayersCount] = useState<number>(() =>
+    AdminDataStore.getRestrictions().filter((r) => r.status === 'active').length
+  );
+  const [liveMatchesBadgeCount, setLiveMatchesBadgeCount] = useState<number>(0);
+
+  // Poll badges periodically
+  React.useEffect(() => {
+    const updateBadges = async () => {
+      setPendingCashCount(
+        AdminDataStore.getCashRequests().filter((r) => r.status === 'pending').length
+      );
+      setBannedPlayersCount(
+        AdminDataStore.getRestrictions().filter((r) => r.status === 'active').length
+      );
+      try {
+        const res = await fetch('/api/ludo/admin/matches/active');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.matches) setLiveMatchesBadgeCount(data.matches.length);
+        }
+      } catch {}
+    };
+
+    updateBadges();
+    const interval = setInterval(updateBadges, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Ludo Tournament Admin State
   const [ludoTournaments, setLudoTournaments] = useState<LudoTournament[]>(() =>
@@ -263,9 +321,14 @@ export const AdminDashboard: React.FC = () => {
       </div>
 
       {/* Admin Navigation Tabs */}
-      <div className="flex items-center gap-1 bg-slate-900 p-1.5 rounded-2xl border border-slate-800 overflow-x-auto">
+      <div className="flex items-center gap-1.5 bg-slate-900 p-1.5 rounded-2xl border border-slate-800 overflow-x-auto">
         {[
-          { id: 'ludo-tables', label: '🎲 Ludo Tables & Rewards', icon: Trophy },
+          { id: 'ludo-tables', label: '🎲 Ludo Table Management', icon: Trophy },
+          { id: 'bots', label: '🤖 Ludo Bots (5000+)', icon: Bot },
+          { id: 'cash-requests', label: '📋 Cash Requests', icon: FileText, badge: pendingCashCount, badgeColor: 'bg-amber-400 text-slate-950' },
+          { id: 'players', label: '👤 Player Management', icon: UserCheck },
+          { id: 'bans', label: '🛡️ Bans & Blacklist', icon: Ban, badge: bannedPlayersCount, badgeColor: 'bg-rose-500 text-white' },
+          { id: 'active-matches', label: '⚡ Active Games', icon: Zap, badge: liveMatchesBadgeCount, badgeColor: 'bg-blue-500 text-white' },
           { id: 'wallet', label: '💰 Coins & Wallet', icon: Coins },
           { id: 'scores', label: 'Match Scores & Points', icon: Trophy },
           { id: 'tournaments', label: 'Cricket Tournaments', icon: Play },
@@ -280,14 +343,19 @@ export const AdminDashboard: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setAdminTab(tab.id as any)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
                 adminTab === tab.id
-                  ? 'bg-amber-500 text-slate-950 shadow-md'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
+              <Icon className="w-3.5 h-3.5 shrink-0" />
               <span>{tab.label}</span>
+              {Boolean(tab.badge && tab.badge > 0) && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${tab.badgeColor || 'bg-slate-700 text-white'}`}>
+                  {tab.badge}
+                </span>
+              )}
             </button>
           );
         })}
@@ -726,8 +794,23 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* LUDO TABLES & CASH REWARDS TAB */}
+      {/* 1. LUDO TABLE MANAGEMENT TAB */}
       {adminTab === 'ludo-tables' && <AdminLudoTablesSection />}
+
+      {/* LUDO VIRTUAL BOTS & QA SIMULATION TAB (5000+ POOL) */}
+      {adminTab === 'bots' && <AdminBotsSection />}
+
+      {/* 2. MANUAL CASH ADDITION REQUESTS TAB */}
+      {adminTab === 'cash-requests' && <AdminCashRequestsSection />}
+
+      {/* 3. PLAYER & UID MANAGEMENT TAB */}
+      {adminTab === 'players' && <AdminPlayersSection />}
+
+      {/* 4. BANS & BLACKLIST TAB */}
+      {adminTab === 'bans' && <AdminBansSection />}
+
+      {/* 5. LIVE MATCH CONTROL TAB */}
+      {adminTab === 'active-matches' && <AdminActiveMatchesSection />}
 
       {/* WALLET & FINANCIAL CONTROL TAB */}
       {adminTab === 'wallet' && <AdminWalletSection />}

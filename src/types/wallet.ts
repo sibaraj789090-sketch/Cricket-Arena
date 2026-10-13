@@ -31,6 +31,7 @@ export interface WalletTransaction {
   referenceId: string;
   description: string;
   createdAt: string;
+  timestamp?: string;
   metadata?: Record<string, any>;
 }
 

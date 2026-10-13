@@ -316,9 +316,19 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({ gameState, onSelectToken }
                           {/* Inner glossy gem center */}
                           <div className="w-1.5 h-1.5 rounded-full bg-white/95 shadow-sm" />
 
+                          {/* Token recorded score in Timer Ludo */}
+                          {tok.score !== undefined && tok.score > 0 && (
+                            <span
+                              className="absolute -bottom-1 -left-1 bg-amber-400 text-slate-950 font-mono text-[7px] sm:text-[8px] font-black rounded-full px-1 border border-black/60 shadow-md leading-none z-30"
+                              title={`Token holds ${tok.score} points`}
+                            >
+                              {tok.score}
+                            </span>
+                          )}
+
                           {/* Multiple tokens counter badge if clustered */}
                           {tokensHere.length > 1 && idx === tokensHere.length - 1 && (
-                            <span className="absolute -top-1.5 -right-1.5 bg-black/80 text-white font-mono text-[8px] font-black rounded-full px-1 border border-white/50 leading-none">
+                            <span className="absolute -top-1.5 -right-1.5 bg-black/80 text-white font-mono text-[8px] font-black rounded-full px-1 border border-white/50 leading-none z-30">
                               {tokensHere.length}
                             </span>
                           )}

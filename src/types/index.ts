@@ -132,7 +132,7 @@ export interface AuditLog {
   adminId: string;
   adminName: string;
   action: string;
-  targetType: 'tournament' | 'score' | 'points_rule' | 'team' | 'player';
+  targetType: 'tournament' | 'score' | 'points_rule' | 'team' | 'player' | 'cash_request' | 'user' | 'player_restriction' | 'wallet';
   targetId: string;
   details: string;
   timestamp: string;
@@ -143,7 +143,9 @@ export interface UserProfile {
   email: string;
   name: string;
   role: 'admin' | 'user';
+  avatar?: string;
   avatarUrl?: string;
+  joinedAt?: string;
   joinedTournamentsCount: number;
   totalFantasyPoints: number;
   createdTeamsCount: number;
@@ -159,6 +161,8 @@ export interface LudoToken {
   id: number; // 0, 1, 2, 3
   color: LudoColor;
   step: number; // -1 = in yard/base, 0..50 = main track, 51..55 = home stretch, 56 = in home/finished
+  score?: number; // Accumulated points recorded on this token
+  reachedHome?: boolean; // Has 60-point home bonus already been awarded
 }
 
 export interface LudoGameState {
@@ -174,6 +178,7 @@ export interface LudoGameState {
   lastActionText: string;
   extraTurn: boolean;
   highlightedTokenIds: number[];
+  scores?: Record<LudoColor, number>; // Authoritative live scores by color
 }
 
 export type LudoTournamentStatus = 'upcoming' | 'registration_open' | 'in_progress' | 'completed' | 'cancelled';

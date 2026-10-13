@@ -423,6 +423,15 @@ export class WalletDataStore {
     return { success: true, newBalance: balanceAfter };
   }
 
+  static adjustBalance(
+    userId: string,
+    amountDelta: number,
+    reason: string,
+    adminName: string
+  ): { success: boolean; newBalance: number; error?: string } {
+    return this.manualAdjustment(userId, amountDelta, reason, adminName);
+  }
+
   // Reserve Game Entry Fee
   static reserveGameEntry(
     userId: string,

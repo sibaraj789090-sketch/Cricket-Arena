@@ -11,13 +11,25 @@ const getSavedSupabaseConfig = () => {
   const customUrl = typeof window !== 'undefined' ? localStorage.getItem('cricket_arena_supabase_url') : '';
   const customKey = typeof window !== 'undefined' ? localStorage.getItem('cricket_arena_supabase_anon_key') : '';
 
-  const url = customUrl || envUrl;
-  const key = customKey || envKey;
+  const url = (customUrl || envUrl || '').trim();
+  const key = (customKey || envKey || '').trim();
+
+  // Guard against defunct repository import URL or placeholders that return 404 or fail to fetch
+  const isDefunctUrl = url.includes('amdmlwmkzcjnpzzyzivr.supabase.co') && !customUrl;
+  const isPlaceholder =
+    !url ||
+    url.includes('xyzcompany') ||
+    url.includes('placeholder') ||
+    url.includes('example.com') ||
+    url.includes('your-project') ||
+    url.includes('<');
+
+  const isConfigured = Boolean(url && key && url.startsWith('http') && !isDefunctUrl && !isPlaceholder);
 
   return {
     url,
     key,
-    isConfigured: Boolean(url && key && url.startsWith('http')),
+    isConfigured,
   };
 };
 

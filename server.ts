@@ -6,6 +6,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import crypto from 'crypto';
 import { ludoRouter } from './src/server/ludoMatchServer';
 import { ludoBotRouter } from './src/server/ludoBotRouter';
 import { userAuthRouter } from './src/server/userAuthServer';
@@ -32,16 +33,51 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Normalize request URL for Vercel edge/serverless rewrites
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const queryParam = req.query?.__path || (req.query as any)?.[0] || req.query?.path;
+  const queryPath = Array.isArray(queryParam) ? queryParam.join('/') : (queryParam as string | undefined);
+
+  const matchedPath =
+    (req.headers['x-matched-path'] as string) ||
+    (req.headers['x-vercel-matched-path'] as string) ||
+    (req as any).originalUrl;
+
+  if (queryPath) {
+    const cleanSubPath = queryPath.replace(/^\/+/, '');
+    req.url = cleanSubPath.startsWith('api/') ? `/${cleanSubPath}` : `/api/${cleanSubPath}`;
+  } else if (matchedPath && matchedPath.startsWith('/api') && (req.url === '/api' || req.url === '/' || !req.url.startsWith('/api/'))) {
+    req.url = matchedPath;
+  } else if (req.url && !req.url.startsWith('/api')) {
+    if (
+      req.url.startsWith('/wallet/') ||
+      req.url.startsWith('/auth/') ||
+      req.url.startsWith('/ludo/') ||
+      req.url.startsWith('/admin/') ||
+      req.url.startsWith('/teams/') ||
+      req.url.startsWith('/health')
+    ) {
+      req.url = `/api${req.url}`;
+    }
+  }
+  next();
+});
 
 // Mount User Sign Up and Login Router (No OTP, Gmail & Phone Auth)
 app.use('/api/auth', userAuthRouter);
+app.use('/auth', userAuthRouter);
 
 // Mount Authoritative Online Ludo Multiplayer Router
 app.use('/api/ludo', ludoRouter);
+app.use('/ludo', ludoRouter);
 
 // Mount Ludo Virtual Bots & QA Simulation Router (Temporary pre-launch feature)
 app.use('/api/admin/bots', ludoBotRouter);
+app.use('/admin/bots', ludoBotRouter);
 app.use('/api/ludo/bots', ludoBotRouter);
+app.use('/ludo/bots', ludoBotRouter);
 
 // In-memory server-side audit logs & score locks
 interface ServerAuditLog {
@@ -361,8 +397,10 @@ interface ServerPaymentOrder {
   coinsAwarded: number;
   status: 'created' | 'pending' | 'completed' | 'failed';
   gatewayOrderId: string;
+  paymentSessionId?: string;
   gatewayPaymentId?: string;
   paymentMethod?: string;
+  gatewayType: 'cashfree' | 'razorpay';
   createdAt: string;
   updatedAt: string;
 }
@@ -370,125 +408,455 @@ interface ServerPaymentOrder {
 const serverPaymentOrders: Map<string, ServerPaymentOrder> = new Map();
 const processedPaymentSignatures: Set<string> = new Set(); // Idempotency check
 
+// Payment Gateway Configuration Helper
+const getPaymentGatewayConfig = () => {
+  const keyId = (process.env.PAYMENT_GATEWAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '').trim();
+  const keySecret = (process.env.PAYMENT_GATEWAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET || '').trim();
+  const webhookSecret = (process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
+
+  const isConfigured = Boolean(keyId && keySecret);
+  // Auto-detect gateway provider based on key formats
+  const isCashfree = keySecret.startsWith('cfsk_') || keyId.length > 20 || (!keyId.startsWith('rzp_') && keyId.length >= 10);
+  const isProd = isCashfree
+    ? (keySecret.startsWith('cfsk_ma_prod_') || !keySecret.includes('test'))
+    : !keyId.startsWith('rzp_test_');
+
+  return {
+    keyId,
+    keySecret,
+    webhookSecret,
+    isConfigured,
+    gatewayType: (isCashfree ? 'cashfree' : 'razorpay') as 'cashfree' | 'razorpay',
+    isProd,
+    cashfreeBaseUrl: isProd ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg',
+  };
+};
+
+const SUPPORTED_PAYMENT_METHODS = ['upi', 'card', 'netbanking'] as const;
+type SupportedPaymentMethod = (typeof SUPPORTED_PAYMENT_METHODS)[number];
+
 // Get Wallet Config & Packages
 app.get('/api/wallet/config', (req: Request, res: Response) => {
+  const gwConfig = getPaymentGatewayConfig();
   res.json({
     settings: serverWalletSettings,
     packages: serverCoinPackages.filter((p) => p.isActive).sort((a, b) => a.displayOrder - b.displayOrder),
+    gatewayConfigured: gwConfig.isConfigured,
+    gatewayType: gwConfig.isConfigured ? gwConfig.gatewayType : null,
+    isProd: gwConfig.isProd,
   });
 });
 
 // Create Secure Payment Order on Server
-app.post('/api/wallet/create-order', (req: Request, res: Response) => {
-  const { userId, packageId, customAmountInr } = req.body;
+app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
+  try {
+    const {
+      userId,
+      packageId,
+      customAmountInr,
+      paymentMethod = 'upi',
+      customerName,
+      customerEmail,
+      customerPhone,
+    } = req.body || {};
 
-  if (!userId) {
-    return res.status(400).json({ error: 'User ID is required.' });
-  }
-
-  if (!serverWalletSettings.topUpEnabled) {
-    return res.status(403).json({ error: 'Coin purchases are currently disabled by administration.' });
-  }
-
-  let amountInr = 0;
-  let coinsAwarded = 0;
-
-  if (packageId === 'custom') {
-    const customAmt = Number(customAmountInr);
-    if (isNaN(customAmt) || customAmt < serverWalletSettings.minDepositInr) {
-      return res.status(400).json({ error: `Minimum deposit amount is ₹${serverWalletSettings.minDepositInr}.` });
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      return res.status(400).json({ success: false, error: 'User ID is required to create a payment order.' });
     }
-    if (customAmt > serverWalletSettings.maxDepositInr) {
-      return res.status(400).json({ error: `Maximum deposit amount is ₹${serverWalletSettings.maxDepositInr}.` });
+
+    // Ban / Player restriction enforcement
+    const banStatus = checkUserBanStatus(userId, 'all');
+    if (banStatus.banned) {
+      return res.status(403).json({
+        success: false,
+        error: `Your account is restricted (${banStatus.reason || 'Restricted by administrator'}). Purchases are suspended.`,
+      });
     }
-    amountInr = customAmt;
-    coinsAwarded = Math.floor(customAmt * serverWalletSettings.coinToInrRate);
-  } else {
-    // Authoritative lookup from server package catalog (never trust client amounts)
-    const pkg = serverCoinPackages.find((p) => p.id === packageId && p.isActive);
-    if (!pkg) {
-      return res.status(404).json({ error: 'Invalid or inactive package selected.' });
+
+    if (!serverWalletSettings.topUpEnabled) {
+      return res.status(403).json({
+        success: false,
+        error: 'Coin purchases are currently disabled by administration.',
+      });
     }
-    amountInr = pkg.priceInr;
-    coinsAwarded = pkg.coins + pkg.bonusCoins;
+
+    // Validate payment method
+    const validMethod = String(paymentMethod || 'upi').toLowerCase().trim() as SupportedPaymentMethod;
+    if (!SUPPORTED_PAYMENT_METHODS.includes(validMethod)) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported payment method "${paymentMethod}". Supported methods: UPI / QR, Card, and NetBanking.`,
+      });
+    }
+
+    let amountInr = 0;
+    let coinsAwarded = 0;
+
+    if (packageId === 'custom') {
+      const customAmt = Number(customAmountInr);
+      if (isNaN(customAmt) || customAmt < serverWalletSettings.minDepositInr) {
+        return res.status(400).json({
+          success: false,
+          error: `Minimum deposit amount is ₹${serverWalletSettings.minDepositInr}.`,
+        });
+      }
+      if (customAmt > serverWalletSettings.maxDepositInr) {
+        return res.status(400).json({
+          success: false,
+          error: `Maximum deposit amount is ₹${serverWalletSettings.maxDepositInr.toLocaleString()}.`,
+        });
+      }
+      amountInr = Math.floor(customAmt);
+      coinsAwarded = Math.floor(amountInr * serverWalletSettings.coinToInrRate);
+    } else {
+      const pkg = serverCoinPackages.find((p) => p.id === packageId && p.isActive);
+      if (!pkg) {
+        return res.status(404).json({
+          success: false,
+          error: 'Selected coin package is invalid or inactive.',
+        });
+      }
+      amountInr = pkg.priceInr;
+      coinsAwarded = pkg.coins + pkg.bonusCoins;
+    }
+
+    const gwConfig = getPaymentGatewayConfig();
+
+    if (!gwConfig.isConfigured) {
+      return res.status(503).json({
+        success: false,
+        error: 'Payment gateway is not configured on the server. Please configure PAYMENT_GATEWAY_KEY_ID and PAYMENT_GATEWAY_KEY_SECRET in server environment variables.',
+        missingGatewayConfig: true,
+      });
+    }
+
+    // Clean unique order ID: Cashfree order_id allows letters, numbers, hyphens, and underscores (max 45 chars)
+    const orderId = `ord_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+
+    let gatewayOrderId = '';
+    let paymentSessionId = '';
+
+    if (gwConfig.gatewayType === 'cashfree') {
+      // Clean customer_id (must be alphanumeric, hyphens, underscores, max 50 chars)
+      const cleanCustomerId = `cust_${userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(-30)}`;
+      const rawPhone = String(customerPhone || '').replace(/\D/g, '');
+      const cleanPhone = rawPhone.length >= 10 ? rawPhone.slice(-10) : '9876543210';
+      const cleanEmail = (customerEmail && String(customerEmail).includes('@')) ? String(customerEmail).trim() : 'player@cricketarena.in';
+      const cleanName = String(customerName || 'Arena Player').trim() || 'Arena Player';
+
+      const cashfreeOrderPayload = {
+        order_id: orderId,
+        order_amount: amountInr,
+        order_currency: 'INR',
+        customer_details: {
+          customer_id: cleanCustomerId,
+          customer_phone: cleanPhone,
+          customer_email: cleanEmail,
+          customer_name: cleanName,
+        },
+        order_meta: {
+          return_url: null,
+          notify_url: null,
+          payment_methods: null,
+        },
+        order_note: `Cricket Arena: ${coinsAwarded} Coins Top-Up`,
+      };
+
+      try {
+        const cfResponse = await fetch(`${gwConfig.cashfreeBaseUrl}/orders`, {
+          method: 'POST',
+          headers: {
+            'x-client-id': gwConfig.keyId,
+            'x-client-secret': gwConfig.keySecret,
+            'x-api-version': '2023-08-01',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(cashfreeOrderPayload),
+        });
+
+        const cfData = await cfResponse.json().catch(() => ({}));
+
+        if (!cfResponse.ok) {
+          console.error('[Cashfree Order Creation Error]', {
+            status: cfResponse.status,
+            message: cfData?.message || cfData?.error || 'Rejected by gateway',
+          });
+
+          return res.status(502).json({
+            success: false,
+            error: cfData?.message
+              ? `Gateway error: ${cfData.message}`
+              : 'Payment gateway rejected order creation. Please verify your details or try again later.',
+          });
+        }
+
+        gatewayOrderId = String(cfData.cf_order_id || cfData.order_id);
+        paymentSessionId = cfData.payment_session_id;
+
+        if (!paymentSessionId) {
+          return res.status(502).json({
+            success: false,
+            error: 'Payment gateway did not provide a valid payment session ID. Please try again.',
+          });
+        }
+      } catch (networkErr: any) {
+        console.error('[Cashfree Network Error]', networkErr?.message || networkErr);
+        return res.status(502).json({
+          success: false,
+          error: 'Failed to communicate with payment gateway. Please check your network connection.',
+        });
+      }
+    } else {
+      // Razorpay Gateway
+      const amountInPaise = Math.round(amountInr * 100);
+      const authHeader = 'Basic ' + Buffer.from(`${gwConfig.keyId}:${gwConfig.keySecret}`).toString('base64');
+
+      try {
+        const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+          method: 'POST',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            amount: amountInPaise,
+            currency: 'INR',
+            receipt: orderId,
+            notes: {
+              userId,
+              packageId,
+              paymentMethod: validMethod,
+            },
+          }),
+        });
+
+        const rzpData = await rzpResponse.json().catch(() => ({}));
+        if (!rzpResponse.ok) {
+          return res.status(502).json({
+            success: false,
+            error: rzpData?.error?.description || 'Payment gateway rejected order creation.',
+          });
+        }
+
+        gatewayOrderId = rzpData.id;
+      } catch (err: any) {
+        return res.status(502).json({
+          success: false,
+          error: 'Failed to communicate with Razorpay payment gateway.',
+        });
+      }
+    }
+
+    const order: ServerPaymentOrder = {
+      id: orderId,
+      userId,
+      packageId,
+      amountInr,
+      coinsAwarded,
+      status: 'pending',
+      gatewayOrderId,
+      paymentSessionId,
+      paymentMethod: validMethod,
+      gatewayType: gwConfig.gatewayType,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    serverPaymentOrders.set(orderId, order);
+    if (gatewayOrderId) {
+      serverPaymentOrders.set(gatewayOrderId, order);
+    }
+
+    return res.json({
+      success: true,
+      orderId,
+      gatewayOrderId,
+      paymentSessionId,
+      gatewayType: gwConfig.gatewayType,
+      isProd: gwConfig.isProd,
+      keyId: gwConfig.gatewayType === 'razorpay' ? gwConfig.keyId : undefined,
+      amountInr,
+      coinsAwarded,
+      currency: 'INR',
+      paymentMethod: validMethod,
+      message: 'Payment order created securely on server.',
+    });
+  } catch (err: any) {
+    console.error('[create-order server exception]', err);
+    return res.status(500).json({
+      success: false,
+      error: 'An internal server error occurred while creating the payment order.',
+    });
   }
-
-  const orderId = `order_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
-  const gatewayOrderId = `pay_gw_${Date.now()}`;
-
-  const order: ServerPaymentOrder = {
-    id: orderId,
-    userId,
-    packageId,
-    amountInr,
-    coinsAwarded,
-    status: 'pending',
-    gatewayOrderId,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  serverPaymentOrders.set(orderId, order);
-
-  res.json({
-    success: true,
-    orderId,
-    gatewayOrderId,
-    amountInr,
-    coinsAwarded,
-    currency: 'INR',
-    message: 'Payment order created securely on server.',
-  });
 });
 
 // Verify Payment & Credit Coins Idempotently
-app.post('/api/wallet/verify-payment', (req: Request, res: Response) => {
-  const { orderId, paymentId, signature } = req.body;
+app.post('/api/wallet/verify-payment', async (req: Request, res: Response) => {
+  try {
+    const { orderId, paymentId, signature } = req.body || {};
 
-  if (!orderId || !paymentId) {
-    return res.status(400).json({ error: 'orderId and paymentId are required for verification.' });
-  }
+    if (!orderId && !paymentId) {
+      return res.status(400).json({ success: false, error: 'Order ID or Payment ID is required for verification.' });
+    }
 
-  const order = serverPaymentOrders.get(orderId);
-  if (!order) {
-    return res.status(404).json({ error: 'Order not found or expired.' });
-  }
+    const order = (orderId ? serverPaymentOrders.get(orderId) : undefined) || (paymentId ? serverPaymentOrders.get(paymentId) : undefined);
+    if (!order) {
+      return res.status(404).json({ success: false, error: 'Payment order not found or expired on server.' });
+    }
 
-  // Idempotency check: prevent duplicate credits
-  const paymentKey = `${orderId}:${paymentId}`;
-  if (order.status === 'completed' || processedPaymentSignatures.has(paymentKey)) {
+    // Idempotency check: prevent duplicate credits
+    const paymentKey = `${order.id}:${paymentId || order.gatewayOrderId}`;
+    if (order.status === 'completed' || processedPaymentSignatures.has(paymentKey)) {
+      return res.json({
+        success: true,
+        idempotent: true,
+        message: 'Payment already verified and credited.',
+        coinsAwarded: order.coinsAwarded,
+        amountInr: order.amountInr,
+        orderId: order.id,
+      });
+    }
+
+    const gwConfig = getPaymentGatewayConfig();
+
+    if (order.gatewayType === 'cashfree') {
+      // Verify payment with Cashfree API
+      try {
+        const cfOrderRes = await fetch(`${gwConfig.cashfreeBaseUrl}/orders/${order.id}`, {
+          method: 'GET',
+          headers: {
+            'x-client-id': gwConfig.keyId,
+            'x-client-secret': gwConfig.keySecret,
+            'x-api-version': '2023-08-01',
+          },
+        });
+
+        const cfOrderData = await cfOrderRes.json().catch(() => ({}));
+
+        if (!cfOrderRes.ok) {
+          return res.status(502).json({
+            success: false,
+            error: 'Failed to verify payment status with Cashfree.',
+          });
+        }
+
+        if (cfOrderData.order_status !== 'PAID') {
+          return res.status(400).json({
+            success: false,
+            error: `Payment is not confirmed by gateway (status: ${cfOrderData.order_status || 'PENDING'}). Coins have not been credited.`,
+            orderStatus: cfOrderData.order_status,
+          });
+        }
+
+        if (Number(cfOrderData.order_amount) !== Number(order.amountInr)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Payment amount mismatch detected. Transaction suspended.',
+          });
+        }
+      } catch (err: any) {
+        return res.status(502).json({
+          success: false,
+          error: 'Network error while verifying payment with Cashfree gateway.',
+        });
+      }
+    } else {
+      // Razorpay signature verification
+      if (!signature || !paymentId) {
+        return res.status(400).json({ success: false, error: 'Payment ID and Signature are required for verification.' });
+      }
+
+      const expected = crypto
+        .createHmac('sha256', gwConfig.keySecret)
+        .update(`${order.gatewayOrderId}|${paymentId}`)
+        .digest('hex');
+
+      if (expected !== signature) {
+        return res.status(400).json({ success: false, error: 'Invalid payment signature. Verification failed.' });
+      }
+    }
+
+    // Mark as completed
+    processedPaymentSignatures.add(paymentKey);
+    order.status = 'completed';
+    order.gatewayPaymentId = paymentId || `cf_pay_${Date.now()}`;
+    order.updatedAt = new Date().toISOString();
+
+    // Authoritative Server Audit Log
+    const auditEntry: ServerAuditLog = {
+      id: `audit-pay-${Date.now()}`,
+      adminId: 'system-gateway',
+      adminName: `${order.gatewayType.toUpperCase()} Gateway Verified`,
+      action: 'COIN_TOPUP_VERIFIED',
+      targetType: 'wallet',
+      targetId: order.userId,
+      details: `Verified ₹${order.amountInr} payment via ${order.gatewayType.toUpperCase()} (${order.id}). Credited ${order.coinsAwarded} coins.`,
+      timestamp: new Date().toISOString(),
+    };
+    serverAuditLogs.unshift(auditEntry);
+
     return res.json({
       success: true,
-      idempotent: true,
-      message: 'Payment already verified and credited.',
       coinsAwarded: order.coinsAwarded,
+      amountInr: order.amountInr,
+      orderId: order.id,
+      gatewayOrderId: order.gatewayOrderId,
+      gatewayPaymentId: order.gatewayPaymentId,
+      message: 'Payment verified successfully. Coins credited.',
+    });
+  } catch (err: any) {
+    console.error('[verify-payment server exception]', err);
+    return res.status(500).json({
+      success: false,
+      error: 'An internal server error occurred while verifying the payment.',
     });
   }
+});
 
-  processedPaymentSignatures.add(paymentKey);
-  order.status = 'completed';
-  order.gatewayPaymentId = paymentId;
-  order.updatedAt = new Date().toISOString();
+// Cashfree & Razorpay Webhook Handler
+app.post('/api/wallet/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+  try {
+    const gwConfig = getPaymentGatewayConfig();
+    const signature = (req.headers['x-webhook-signature'] as string) || (req.headers['x-razorpay-signature'] as string);
+    const bodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
 
-  // Audit log for financial credit
-  const auditEntry: ServerAuditLog = {
-    id: `audit-pay-${Date.now()}`,
-    adminId: 'system-gateway',
-    adminName: 'Payment Gateway Webhook',
-    action: 'COIN_TOPUP_VERIFIED',
-    targetType: 'wallet',
-    targetId: order.userId,
-    details: `Verified ₹${order.amountInr} payment (${paymentId}). Credited ${order.coinsAwarded} coins.`,
-    timestamp: new Date().toISOString(),
-  };
-  serverAuditLogs.unshift(auditEntry);
+    if (gwConfig.webhookSecret && signature) {
+      const timestamp = (req.headers['x-webhook-timestamp'] as string) || '';
+      const payloadToSign = timestamp ? `${timestamp}${bodyStr}` : bodyStr;
+      const expected = crypto.createHmac('sha256', gwConfig.webhookSecret).update(payloadToSign).digest('base64');
+      const expectedHex = crypto.createHmac('sha256', gwConfig.webhookSecret).update(payloadToSign).digest('hex');
 
-  res.json({
-    success: true,
-    coinsAwarded: order.coinsAwarded,
-    amountInr: order.amountInr,
-    message: 'Payment verified successfully. Coins credited.',
-  });
+      if (signature !== expected && signature !== expectedHex) {
+        return res.status(400).json({ error: 'Invalid webhook signature' });
+      }
+    }
+
+    const payload = typeof req.body === 'object' ? req.body : JSON.parse(bodyStr || '{}');
+    const orderId = payload?.data?.order?.order_id || payload?.payload?.payment?.entity?.notes?.orderId;
+    const isSuccess = payload?.type === 'PAYMENT_SUCCESS_WEBHOOK' || payload?.type === 'ORDER_PAID_WEBHOOK' || payload?.event === 'payment.captured';
+
+    if (orderId && isSuccess) {
+      const order = serverPaymentOrders.get(orderId);
+      if (order && order.status !== 'completed') {
+        order.status = 'completed';
+        order.updatedAt = new Date().toISOString();
+        serverAuditLogs.unshift({
+          id: `audit-wb-${Date.now()}`,
+          adminId: 'webhook',
+          adminName: 'Payment Gateway Webhook',
+          action: 'WEBHOOK_PAYMENT_CONFIRMED',
+          targetType: 'wallet',
+          targetId: order.userId,
+          details: `Webhook confirmed payment for order ${orderId}. Credited ${order.coinsAwarded} coins.`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    return res.json({ status: 'ok' });
+  } catch {
+    return res.status(200).json({ status: 'ignored' });
+  }
 });
 
 // Admin Update Wallet Settings

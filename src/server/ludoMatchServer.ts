@@ -32,6 +32,7 @@ import {
   generateStealthPlayer,
 } from './ludoBotEngine';
 import { requireAdminRole } from './adminAuthServer';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export const ludoRouter = express.Router();
 
@@ -406,6 +407,34 @@ export function createAndStartMatch(
 
   activeMatches.set(matchId, newMatch);
   updateTableQueueStats();
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const realPlayerIds = matchedPlayers
+        .map((p) => p.userId)
+        .filter((uid) => uid && !uid.startsWith('bot-'));
+
+      supabase
+        .from('ludo_table_matches')
+        .upsert({
+          id: matchId,
+          table_id: table.id,
+          status: 'in_progress',
+          max_players: table.mode,
+          player_ids: realPlayerIds,
+          players_data: onlinePlayers,
+          game_state: initialGame,
+          created_at: newMatch.createdAt,
+          updated_at: new Date().toISOString(),
+        })
+        .then(({ error }: any) => {
+          if (error) console.warn('[LudoMatchServer] Supabase ludo_table_matches upsert warning:', error.message);
+        })
+        .catch((err: any) => console.warn('[LudoMatchServer] Supabase upsert error:', err));
+    } catch (err) {
+      console.warn('[LudoMatchServer] Failed to persist match to Supabase:', err);
+    }
+  }
 
   addBotLog({
     matchId,

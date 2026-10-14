@@ -69,6 +69,54 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+// Dynamically load Cashfree JS SDK v3
+const loadCashfreeSdk = (): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('Window is not available'));
+    if ((window as any).Cashfree) return resolve((window as any).Cashfree);
+
+    const existing = document.getElementById('cashfree-sdk-script');
+    if (existing) {
+      existing.addEventListener('load', () => resolve((window as any).Cashfree));
+      existing.addEventListener('error', () => reject(new Error('Failed to load Cashfree SDK')));
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'cashfree-sdk-script';
+    script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+    script.async = true;
+    script.onload = () => resolve((window as any).Cashfree);
+    script.onerror = () =>
+      reject(new Error('Failed to load payment gateway SDK. Please check your internet connection.'));
+    document.body.appendChild(script);
+  });
+};
+
+// Dynamically load Razorpay SDK if configured
+const loadRazorpaySdk = (): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('Window is not available'));
+    if ((window as any).Razorpay) return resolve((window as any).Razorpay);
+
+    const existing = document.getElementById('razorpay-sdk-script');
+    if (existing) {
+      existing.addEventListener('load', () => resolve((window as any).Razorpay));
+      existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay SDK')));
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'razorpay-sdk-script';
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve((window as any).Razorpay);
+    script.onerror = () =>
+      reject(new Error('Failed to load Razorpay payment SDK.'));
+    document.body.appendChild(script);
+  });
+};
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isAdmin } = useAuth();
   const currentUserId = user?.id || 'user-demo-1';
@@ -147,6 +195,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [currentUserId, isAdmin, refreshWallet]);
 
   // Secure Buy Coins (Deposit) with Server Verification & Supabase RPC
+  // Secure Buy Coins (Deposit) with Gateway Modal & Server Verification
   const buyCoins = async (
     packageId: string | 'custom',
     customAmountInr?: number,
@@ -175,71 +224,166 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       // 2. Server-Side Order Creation (Authoritative calculation & tamper prevention)
-      let orderId = `order_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
-      let amountInr = 0;
-      let coinsAwarded = 0;
+      const orderRes = await fetch('/api/wallet/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUserId,
+          packageId,
+          customAmountInr,
+          paymentMethod,
+          customerName: user?.name || 'Arena Player',
+          customerEmail: user?.email || 'player@cricketarena.in',
+          customerPhone: (user as any)?.phone || '9876543210',
+        }),
+      });
 
-      try {
-        const orderRes = await fetch('/api/wallet/create-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUserId,
-            packageId,
-            customAmountInr,
-          }),
-        });
+      if (!orderRes.ok) {
+        const errData = await orderRes.json().catch(() => ({}));
+        setIsProcessingPayment(false);
+        return {
+          success: false,
+          error:
+            errData.error ||
+            'Server rejected payment order creation. Please verify server payment gateway credentials.',
+        };
+      }
 
-        if (!orderRes.ok) {
-          const errData = await orderRes.json().catch(() => ({}));
+      const orderData = await orderRes.json();
+      if (!orderData.success) {
+        setIsProcessingPayment(false);
+        return { success: false, error: orderData.error || 'Failed to create payment order.' };
+      }
+
+      const {
+        orderId,
+        gatewayOrderId,
+        paymentSessionId,
+        gatewayType,
+        isProd,
+        amountInr,
+        coinsAwarded,
+      } = orderData;
+
+      // 3. Initiate Gateway Checkout Modal
+      if (gatewayType === 'cashfree') {
+        if (!paymentSessionId) {
           setIsProcessingPayment(false);
-          return { success: false, error: errData.error || 'Server rejected payment order creation.' };
+          return {
+            success: false,
+            error: 'Payment gateway did not provide a valid payment session ID. Please try again.',
+          };
         }
 
-        const orderData = await orderRes.json();
-        orderId = orderData.orderId;
-        amountInr = orderData.amountInr;
-        coinsAwarded = orderData.coinsAwarded;
-      } catch (err) {
-        console.warn('Backend server order create failed, falling back to authoritative package store:', err);
-        // Authoritative fallback lookup
-        if (packageId === 'custom') {
-          amountInr = customAmountInr || 100;
-          coinsAwarded = Math.floor(amountInr * settings.coinToInrRate);
-        } else {
-          const pkg = allPackages.find((p) => p.id === packageId)!;
-          amountInr = pkg.priceInr;
-          coinsAwarded = pkg.coins + pkg.bonusCoins;
+        try {
+          const CashfreeFactory = await loadCashfreeSdk();
+          const cashfree = CashfreeFactory({
+            mode: isProd ? 'production' : 'sandbox',
+          });
+
+          // Open Cashfree checkout in modal
+          const checkoutResult = await cashfree.checkout({
+            paymentSessionId,
+            redirectTarget: '_modal',
+          });
+
+          if (checkoutResult?.error) {
+            setIsProcessingPayment(false);
+            return {
+              success: false,
+              error: checkoutResult.error.message || 'Payment was cancelled or dismissed.',
+            };
+          }
+        } catch (sdkErr: any) {
+          setIsProcessingPayment(false);
+          return {
+            success: false,
+            error:
+              sdkErr?.message ||
+              'Unable to load Cashfree payment modal. Please disable ad-blockers and try again.',
+          };
+        }
+      } else {
+        // Razorpay Gateway
+        try {
+          const RazorpayClass = await loadRazorpaySdk();
+          const rzpResult = await new Promise<{ paymentId: string; signature: string }>((resolve, reject) => {
+            const options = {
+              key: orderData.keyId,
+              amount: Math.round(amountInr * 100),
+              currency: 'INR',
+              name: 'Cricket Arena',
+              description: `${coinsAwarded} Coins Top-Up`,
+              order_id: gatewayOrderId,
+              prefill: {
+                name: user?.name || 'Arena Player',
+                email: user?.email || 'player@cricketarena.in',
+                contact: (user as any)?.phone || '9876543210',
+              },
+              theme: { color: '#10b981' },
+              modal: {
+                ondismiss: () => reject(new Error('Payment was cancelled by user.')),
+              },
+              handler: (res: any) => {
+                resolve({
+                  paymentId: res.razorpay_payment_id,
+                  signature: res.razorpay_signature,
+                });
+              },
+            };
+            const rzp = new RazorpayClass(options);
+            rzp.open();
+          });
+
+          // Verify with Razorpay signature on server
+          const verifyRes = await fetch('/api/wallet/verify-payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId,
+              paymentId: rzpResult.paymentId,
+              signature: rzpResult.signature,
+            }),
+          });
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          if (!verifyRes.ok || !verifyData.success) {
+            setIsProcessingPayment(false);
+            return { success: false, error: verifyData.error || 'Payment signature verification failed.' };
+          }
+        } catch (rzpErr: any) {
+          setIsProcessingPayment(false);
+          return { success: false, error: rzpErr?.message || 'Payment cancelled.' };
         }
       }
 
-      // 3. Server-Side Payment Verification (Simulate/verify payment signature)
-      const mockPaymentId = `pay_tx_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
-      try {
+      // 4. Server-Side Payment Status Verification
+      if (gatewayType === 'cashfree') {
         const verifyRes = await fetch('/api/wallet/verify-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderId,
-            paymentId: mockPaymentId,
-            signature: `sig_${Date.now()}`,
-          }),
+          body: JSON.stringify({ orderId }),
         });
 
-        if (verifyRes.ok) {
-          const verifyData = await verifyRes.json();
-          if (verifyData.coinsAwarded) {
-            coinsAwarded = verifyData.coinsAwarded;
-          }
+        const verifyData = await verifyRes.json().catch(() => ({}));
+        if (!verifyRes.ok || !verifyData.success) {
+          setIsProcessingPayment(false);
+          return {
+            success: false,
+            error:
+              verifyData.error ||
+              'Payment has not been confirmed by the gateway. Coins will only be credited after successful payment.',
+          };
         }
-      } catch {
-        // Fall through
       }
 
+      // 5. Coins Credited (Only executed after verified confirmation!)
       const referenceId = `PAY-ORD-${orderId}`;
-      const packageTitle = packageId === 'custom' ? `Custom Top-Up ₹${amountInr}` : (allPackages.find((p) => p.id === packageId)?.title || 'Coin Package');
+      const packageTitle =
+        packageId === 'custom'
+          ? `Custom Top-Up ₹${amountInr}`
+          : allPackages.find((p) => p.id === packageId)?.title || 'Coin Package';
 
-      // 4. Supabase RPC Atomic Stored Procedure (Database-level transactional guarantee)
+      // Supabase RPC
       if (isSupabaseConfigured && supabase) {
         try {
           const { data: rpcResult, error: rpcError } = await supabase.rpc('rpc_credit_wallet_deposit', {
@@ -251,10 +395,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             p_description: `Deposit: ${packageTitle} (₹${amountInr} = ${coinsAwarded} Coins)`,
           });
 
-          if (rpcError) {
-            console.warn('Supabase atomic RPC deposit warning (falling back to local cache):', rpcError.message);
-          } else if (rpcResult && rpcResult.balance !== undefined) {
-            // Updated directly by atomic stored procedure
+          if (!rpcError && rpcResult && rpcResult.balance !== undefined) {
             WalletDataStore.saveWallet({
               userId: currentUserId,
               balance: rpcResult.balance,
@@ -264,11 +405,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             });
           }
         } catch (dbErr: any) {
-          console.warn('Supabase RPC call warning (falling back to local cache):', dbErr);
+          console.warn('Supabase RPC call warning:', dbErr);
         }
       }
 
-      // 5. Commit atomic transaction to local ledger cache
+      // Commit to local storage ledger
       const localResult = WalletDataStore.creditDeposit(
         currentUserId,
         coinsAwarded,
@@ -296,7 +437,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     amountInr: number,
     payoutMethod: PayoutMethod,
     payoutDetails: WithdrawalRequest['payoutDetails']
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; request?: WithdrawalRequest }> => {
     setIsLoading(true);
 
     try {

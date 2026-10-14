@@ -1425,21 +1425,21 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             </div>
 
             {paymentError && (
-              <p className="text-xs text-rose-400 font-medium flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                {paymentError}
-              </p>
+              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 font-medium flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span className="leading-snug">{paymentError}</span>
+              </div>
             )}
 
             <button
               onClick={handleConfirmPayment}
               disabled={isProcessingPayment}
-              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-lg active:scale-95 flex items-center justify-center gap-2"
+              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isProcessingPayment ? (
                 <>
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Verifying on Server...</span>
+                  <span>Connecting to Gateway...</span>
                 </>
               ) : (
                 <span>

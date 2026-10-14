@@ -5,8 +5,17 @@ const getSavedSupabaseConfig = () => {
   const metaEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : null;
   const procEnv = typeof process !== 'undefined' && process.env ? process.env : null;
 
-  const envUrl = metaEnv?.VITE_SUPABASE_URL || procEnv?.VITE_SUPABASE_URL || '';
-  const envKey = metaEnv?.VITE_SUPABASE_ANON_KEY || procEnv?.VITE_SUPABASE_ANON_KEY || '';
+  const envUrl =
+    metaEnv?.VITE_SUPABASE_URL ||
+    procEnv?.VITE_SUPABASE_URL ||
+    procEnv?.SUPABASE_URL ||
+    '';
+  const envKey =
+    metaEnv?.VITE_SUPABASE_ANON_KEY ||
+    procEnv?.VITE_SUPABASE_ANON_KEY ||
+    procEnv?.SUPABASE_ANON_KEY ||
+    procEnv?.SUPABASE_SERVICE_ROLE_KEY ||
+    '';
 
   const customUrl = typeof window !== 'undefined' ? localStorage.getItem('cricket_arena_supabase_url') : '';
   const customKey = typeof window !== 'undefined' ? localStorage.getItem('cricket_arena_supabase_anon_key') : '';

@@ -1,5 +1,5 @@
-import { LudoCashTable, LudoCashMatch, LudoCashMatchRecord } from './ludoCash';
-import { UserWallet } from './wallet';
+import type { LudoCashTable, LudoCashMatch, LudoCashMatchRecord } from './ludoCash.ts';
+import type { UserWallet } from './wallet.ts';
 
 export type CashRequestStatus = 'pending' | 'approved' | 'rejected';
 

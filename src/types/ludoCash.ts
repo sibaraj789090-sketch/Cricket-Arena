@@ -1,4 +1,4 @@
-import { LudoColor, LudoGameState } from './index';
+import type { LudoColor, LudoGameState } from './index.ts';
 
 export interface LudoCashTable {
   id: string;

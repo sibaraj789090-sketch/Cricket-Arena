@@ -1,4 +1,4 @@
-import { CoinPackage, WalletSettings, UserWallet, WalletTransaction, WithdrawalRequest } from '../types/wallet';
+import type { CoinPackage, WalletSettings, UserWallet, WalletTransaction, WithdrawalRequest } from '../types/wallet.ts';
 
 export const DEFAULT_WALLET_SETTINGS: WalletSettings = {
   topUpEnabled: true,

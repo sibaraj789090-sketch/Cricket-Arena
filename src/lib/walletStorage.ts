@@ -1,4 +1,4 @@
-import {
+import type {
   CoinPackage,
   WalletSettings,
   UserWallet,
@@ -7,13 +7,13 @@ import {
   PayoutMethod,
   TransactionType,
   WithdrawalStatus,
-} from '../types/wallet';
+} from '../types/wallet.ts';
 import {
   DEFAULT_WALLET_SETTINGS,
   INITIAL_COIN_PACKAGES,
   INITIAL_TRANSACTIONS,
   INITIAL_WITHDRAWALS,
-} from './walletData';
+} from './walletData.ts';
 
 const KEYS = {
   SETTINGS: 'cricket_arena_wallet_settings',

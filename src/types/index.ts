@@ -263,5 +263,5 @@ export interface LudoRoom {
   createdAt: string;
 }
 
-export * from './wallet';
-export * from './ludoCash';
+export type * from './wallet.ts';
+export * from './ludoCash.ts';

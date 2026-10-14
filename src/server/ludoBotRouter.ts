@@ -23,10 +23,10 @@ import {
   getBotMatchLogs,
   clearBotLogs,
   addBotLog,
-} from './ludoBotEngine';
-import { BotStrategy, SimulationOutcome } from '../types/ludoBot';
+} from './ludoBotEngine.ts';
+import type { BotStrategy, SimulationOutcome } from '../types/ludoBot.ts';
 
-import { requireAdminRole } from './adminAuthServer';
+import { requireAdminRole } from './adminAuthServer.ts';
 
 export const ludoBotRouter = express.Router();
 

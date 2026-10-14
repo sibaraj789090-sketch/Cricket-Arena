@@ -1,4 +1,4 @@
-import { app } from '../server.ts';
+import { app } from '../server.js';
 import type { Request, Response } from 'express';
 
 export default function handler(req: Request, res: Response) {

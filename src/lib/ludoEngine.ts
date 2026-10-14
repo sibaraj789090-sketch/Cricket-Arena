@@ -1,4 +1,4 @@
-import { LudoColor, LudoGameState, LudoToken } from '../types/index';
+import type { LudoColor, LudoGameState, LudoToken } from '../types/index.ts';
 
 // Track offset for each color on the 52-cell main loop
 export const COLOR_OFFSETS: Record<LudoColor, number> = {

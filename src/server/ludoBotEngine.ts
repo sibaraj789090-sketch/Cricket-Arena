@@ -10,7 +10,7 @@
  * - Strict isolation: Zero access to real user wallets or production cash tables
  */
 
-import {
+import type {
   BotStrategy,
   BotMatchStatus,
   SimulationOutcome,
@@ -19,10 +19,10 @@ import {
   BotMatchLog,
   SimulationMatchParams,
   BotPoolStats,
-} from '../types/ludoBot';
-import { LudoCashMatch, LudoOnlinePlayer } from '../types/ludoCash';
-import { LudoColor } from '../types';
-import { createInitialLudoGame, COLOR_OFFSETS, SAFE_CELL_INDICES } from '../lib/ludoEngine';
+} from '../types/ludoBot.ts';
+import type { LudoCashMatch, LudoOnlinePlayer } from '../types/ludoCash.ts';
+import type { LudoColor } from '../types/index.ts';
+import { createInitialLudoGame, COLOR_OFFSETS, SAFE_CELL_INDICES } from '../lib/ludoEngine.ts';
 
 // Global Feature Flag (Defaulting to TRUE so instant matchmaking is enabled)
 export let LUDO_BOTS_ENABLED: boolean = process.env.LUDO_BOTS_ENABLED !== 'false';

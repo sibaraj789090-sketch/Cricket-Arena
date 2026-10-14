@@ -1,4 +1,4 @@
-import { CashAdditionRequest, PlayerRestriction, PlayerProfileSummary, RestrictionType } from '../types/adminControl';
+import type { CashAdditionRequest, PlayerRestriction, PlayerProfileSummary, RestrictionType } from '../types/adminControl.ts';
 
 export interface ServerAuditLog {
   id: string;

@@ -21,8 +21,8 @@ import {
   handleAdminLogout,
   handleAdminCheck,
 } from './src/server/adminAuthServer.ts';
-import { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl.ts';
-import { WithdrawalRequest, PayoutMethod } from './src/types/wallet.ts';
+import type { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl.ts';
+import type { WithdrawalRequest, PayoutMethod } from './src/types/wallet.ts';
 import { INITIAL_WITHDRAWALS } from './src/lib/walletData.ts';
 
 const __filename = fileURLToPath(import.meta.url);

@@ -1,19 +1,19 @@
 import express, { Request, Response } from 'express';
 import {
-  LudoCashTable,
-  LudoCashMatch,
-  LudoOnlinePlayer,
-  LudoCashMatchRecord,
-  RecentLudoWinner,
-  LudoAdminConfig,
+  type LudoCashTable,
+  type LudoCashMatch,
+  type LudoOnlinePlayer,
+  type LudoCashMatchRecord,
+  type RecentLudoWinner,
+  type LudoAdminConfig,
   generateDefaultCashTables,
   LUDO_CASH_TABLE_TIERS,
   getTableBotCounts,
-  LudoScoreBreakdown,
-  LudoScoreEvent,
-  LudoFinalRanking,
-} from '../types/ludoCash';
-import { LudoColor, LudoGameState, LudoToken } from '../types';
+  type LudoScoreBreakdown,
+  type LudoScoreEvent,
+  type LudoFinalRanking,
+} from '../types/ludoCash.ts';
+import type { LudoColor, LudoGameState, LudoToken } from '../types/index.ts';
 import {
   createInitialLudoGame,
   getLegalMoves,
@@ -21,8 +21,8 @@ import {
   getGlobalTrackIndex,
   SAFE_CELL_INDICES,
   capitalize,
-} from '../lib/ludoEngine';
-import { checkUserBanStatus } from './adminControlServer';
+} from '../lib/ludoEngine.ts';
+import { checkUserBanStatus } from './adminControlServer.ts';
 import {
   selectBotMove,
   getBotById,
@@ -30,9 +30,9 @@ import {
   LUDO_BOTS_ENABLED,
   botPoolConfig,
   generateStealthPlayer,
-} from './ludoBotEngine';
-import { requireAdminRole } from './adminAuthServer';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+} from './ludoBotEngine.ts';
+import { requireAdminRole } from './adminAuthServer.ts';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.ts';
 import crypto from 'crypto';
 
 export function toSafeUuid(id: string): string {

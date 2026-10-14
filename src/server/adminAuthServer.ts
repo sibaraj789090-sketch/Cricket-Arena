@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.ts';
 
 // Verified Authorized Administrator Gmail Addresses
 const DEFAULT_AUTHORIZED_ADMIN_EMAILS = [

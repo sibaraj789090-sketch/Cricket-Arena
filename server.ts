@@ -453,16 +453,64 @@ const processedPaymentSignatures: Set<string> = new Set(); // Idempotency check
 
 // Payment Gateway Configuration Helper
 const getPaymentGatewayConfig = () => {
-  const keyId = (process.env.PAYMENT_GATEWAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '').trim();
-  const keySecret = (process.env.PAYMENT_GATEWAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET || '').trim();
-  const webhookSecret = (process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
+  // Support standard Cashfree Vercel environment variables as first-class citizens,
+  // while preserving fallback to generic PAYMENT_GATEWAY_* and RAZORPAY_* variables.
+  const keyId = (
+    process.env.CASHFREE_CLIENT_ID ||
+    process.env.CASHFREE_APP_ID ||
+    process.env.PAYMENT_GATEWAY_KEY_ID ||
+    process.env.RAZORPAY_KEY_ID ||
+    ''
+  ).trim();
+
+  const keySecret = (
+    process.env.CASHFREE_CLIENT_SECRET ||
+    process.env.CASHFREE_SECRET_KEY ||
+    process.env.PAYMENT_GATEWAY_KEY_SECRET ||
+    process.env.RAZORPAY_KEY_SECRET ||
+    ''
+  ).trim();
+
+  const webhookSecret = (
+    process.env.CASHFREE_WEBHOOK_SECRET ||
+    process.env.PAYMENT_GATEWAY_WEBHOOK_SECRET ||
+    process.env.RAZORPAY_WEBHOOK_SECRET ||
+    ''
+  ).trim();
 
   const isConfigured = Boolean(keyId && keySecret);
-  // Auto-detect gateway provider based on key formats
-  const isCashfree = keySecret.startsWith('cfsk_') || keyId.length > 20 || (!keyId.startsWith('rzp_') && keyId.length >= 10);
-  const isProd = isCashfree
-    ? (keySecret.startsWith('cfsk_ma_prod_') || !keySecret.includes('test'))
-    : !keyId.startsWith('rzp_test_');
+
+  // Auto-detect gateway provider based on environment and key formats
+  const hasCashfreeEnv = Boolean(
+    process.env.CASHFREE_CLIENT_ID ||
+    process.env.CASHFREE_CLIENT_SECRET ||
+    process.env.CASHFREE_APP_ID ||
+    process.env.CASHFREE_SECRET_KEY ||
+    process.env.CASHFREE_ENV
+  );
+  const isCashfree = hasCashfreeEnv || keySecret.startsWith('cfsk_') || keyId.length > 20 || (!keyId.startsWith('rzp_') && keyId.length >= 8);
+
+  // Interpret CASHFREE_ENV (case-insensitive)
+  const rawEnv = (
+    process.env.CASHFREE_ENV ||
+    process.env.CASHFREE_ENVIRONMENT ||
+    process.env.PAYMENT_GATEWAY_ENV ||
+    ''
+  ).trim().toLowerCase();
+
+  let isProd = false;
+  if (rawEnv === 'production' || rawEnv === 'prod') {
+    isProd = true;
+  } else if (rawEnv === 'sandbox' || rawEnv === 'test' || rawEnv === 'dev' || rawEnv === 'development') {
+    isProd = false;
+  } else {
+    // Heuristic fallback if CASHFREE_ENV is omitted
+    isProd = isCashfree
+      ? (keySecret.startsWith('cfsk_ma_prod_') || (!keySecret.toLowerCase().includes('test') && !keyId.toLowerCase().includes('test')))
+      : !keyId.startsWith('rzp_test_');
+  }
+
+  const apiVersion = (process.env.CASHFREE_API_VERSION || '2023-08-01').trim();
 
   return {
     keyId,
@@ -471,6 +519,7 @@ const getPaymentGatewayConfig = () => {
     isConfigured,
     gatewayType: (isCashfree ? 'cashfree' : 'razorpay') as 'cashfree' | 'razorpay',
     isProd,
+    apiVersion,
     cashfreeBaseUrl: isProd ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg',
   };
 };
@@ -487,6 +536,7 @@ app.get('/api/wallet/config', (req: Request, res: Response) => {
     gatewayConfigured: gwConfig.isConfigured,
     gatewayType: gwConfig.isConfigured ? gwConfig.gatewayType : null,
     isProd: gwConfig.isProd,
+    gatewayMode: gwConfig.isProd ? 'production' : 'sandbox',
   });
 });
 
@@ -568,7 +618,7 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
     if (!gwConfig.isConfigured) {
       return res.status(503).json({
         success: false,
-        error: 'Payment gateway is not configured on the server. Please configure PAYMENT_GATEWAY_KEY_ID and PAYMENT_GATEWAY_KEY_SECRET in server environment variables.',
+        error: 'Payment gateway credentials are not configured on the server. Please verify CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET (or PAYMENT_GATEWAY_KEY_ID/SECRET) in your environment variables.',
         missingGatewayConfig: true,
       });
     }
@@ -587,9 +637,22 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
       const cleanEmail = (customerEmail && String(customerEmail).includes('@')) ? String(customerEmail).trim() : 'player@cricketarena.in';
       const cleanName = String(customerName || 'Arena Player').trim() || 'Arena Player';
 
+      // Detect host and protocol for safe return_url
+      const host = req.get('host') || 'cricketarena.in';
+      const protoHeader = (req.headers['x-forwarded-proto'] as string) || '';
+      const protocol = protoHeader.includes('https') ? 'https' : (req.secure ? 'https' : 'http');
+      const origin = `${protocol}://${host}`;
+
+      const orderMeta: Record<string, string> = {
+        return_url: `${origin}/?order_id={order_id}`,
+      };
+      if (gwConfig.webhookSecret) {
+        orderMeta.notify_url = `${origin}/api/wallet/webhook`;
+      }
+
       const cashfreeOrderPayload = {
         order_id: orderId,
-        order_amount: amountInr,
+        order_amount: Number(amountInr.toFixed(2)),
         order_currency: 'INR',
         customer_details: {
           customer_id: cleanCustomerId,
@@ -597,10 +660,11 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
           customer_email: cleanEmail,
           customer_name: cleanName,
         },
-        order_meta: {
-          return_url: null,
-          notify_url: null,
-          payment_methods: null,
+        order_meta: orderMeta,
+        order_tags: {
+          userId: cleanCustomerId,
+          packageId: String(packageId),
+          coinsAwarded: String(coinsAwarded),
         },
         order_note: `Cricket Arena: ${coinsAwarded} Coins Top-Up`,
       };
@@ -611,7 +675,7 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
           headers: {
             'x-client-id': gwConfig.keyId,
             'x-client-secret': gwConfig.keySecret,
-            'x-api-version': '2023-08-01',
+            'x-api-version': gwConfig.apiVersion,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(cashfreeOrderPayload),
@@ -620,16 +684,26 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
         const cfData = await cfResponse.json().catch(() => ({}));
 
         if (!cfResponse.ok) {
+          // Log sanitized error details without leaking client secret or auth headers
           console.error('[Cashfree Order Creation Error]', {
             status: cfResponse.status,
+            code: cfData?.code,
+            type: cfData?.type,
+            subCode: cfData?.sub_code,
             message: cfData?.message || cfData?.error || 'Rejected by gateway',
           });
 
+          const gatewayErrorMsg =
+            cfData?.message ||
+            cfData?.error_description ||
+            (typeof cfData?.error === 'string' ? cfData.error : '') ||
+            `Gateway rejected order creation (HTTP ${cfResponse.status})`;
+
           return res.status(502).json({
             success: false,
-            error: cfData?.message
-              ? `Gateway error: ${cfData.message}`
-              : 'Payment gateway rejected order creation. Please verify your details or try again later.',
+            error: `Gateway error: ${gatewayErrorMsg}`,
+            gatewayStatus: cfResponse.status,
+            gatewayCode: cfData?.code,
           });
         }
 
@@ -637,6 +711,7 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
         paymentSessionId = cfData.payment_session_id;
 
         if (!paymentSessionId) {
+          console.error('[Cashfree Error] Missing payment_session_id in response:', cfData);
           return res.status(502).json({
             success: false,
             error: 'Payment gateway did not provide a valid payment session ID. Please try again.',
@@ -742,7 +817,49 @@ app.post('/api/wallet/verify-payment', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Order ID or Payment ID is required for verification.' });
     }
 
-    const order = (orderId ? serverPaymentOrders.get(orderId) : undefined) || (paymentId ? serverPaymentOrders.get(paymentId) : undefined);
+    let order = (orderId ? serverPaymentOrders.get(orderId) : undefined) || (paymentId ? serverPaymentOrders.get(paymentId) : undefined);
+
+    const gwConfig = getPaymentGatewayConfig();
+
+    // In serverless environments (e.g. Vercel), in-memory Map may be reset between lambda invocations.
+    // Recover order details directly from Cashfree API if order is missing in local memory.
+    if (!order && gwConfig.isConfigured && gwConfig.gatewayType === 'cashfree' && (orderId || paymentId)) {
+      const targetOrderId = orderId || paymentId;
+      try {
+        const cfOrderRes = await fetch(`${gwConfig.cashfreeBaseUrl}/orders/${targetOrderId}`, {
+          method: 'GET',
+          headers: {
+            'x-client-id': gwConfig.keyId,
+            'x-client-secret': gwConfig.keySecret,
+            'x-api-version': gwConfig.apiVersion,
+          },
+        });
+        if (cfOrderRes.ok) {
+          const cfData = await cfOrderRes.json().catch(() => ({}));
+          const orderAmount = Number(cfData.order_amount) || 0;
+          const coins = cfData.order_tags?.coinsAwarded
+            ? Number(cfData.order_tags.coinsAwarded)
+            : Math.floor(orderAmount * serverWalletSettings.coinToInrRate);
+          const userIdFromTags = cfData.order_tags?.userId?.replace(/^cust_/, '') || 'anonymous';
+          order = {
+            id: targetOrderId,
+            userId: userIdFromTags,
+            packageId: cfData.order_tags?.packageId || 'custom',
+            amountInr: orderAmount,
+            coinsAwarded: coins,
+            status: cfData.order_status === 'PAID' ? 'completed' : 'pending',
+            gatewayOrderId: String(cfData.cf_order_id || cfData.order_id || targetOrderId),
+            gatewayType: 'cashfree',
+            createdAt: cfData.created_at || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          serverPaymentOrders.set(targetOrderId, order);
+        }
+      } catch (recoveryErr) {
+        console.error('[Cashfree serverless order recovery error]', recoveryErr);
+      }
+    }
+
     if (!order) {
       return res.status(404).json({ success: false, error: 'Payment order not found or expired on server.' });
     }
@@ -760,8 +877,6 @@ app.post('/api/wallet/verify-payment', async (req: Request, res: Response) => {
       });
     }
 
-    const gwConfig = getPaymentGatewayConfig();
-
     if (order.gatewayType === 'cashfree') {
       // Verify payment with Cashfree API
       try {
@@ -770,7 +885,7 @@ app.post('/api/wallet/verify-payment', async (req: Request, res: Response) => {
           headers: {
             'x-client-id': gwConfig.keyId,
             'x-client-secret': gwConfig.keySecret,
-            'x-api-version': '2023-08-01',
+            'x-api-version': gwConfig.apiVersion,
           },
         });
 

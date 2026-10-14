@@ -245,7 +245,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           success: false,
           error:
             errData.error ||
-            'Server rejected payment order creation. Please verify server payment gateway credentials.',
+            `Server rejected payment order creation (HTTP ${orderRes.status}). Please verify server payment gateway credentials.`,
         };
       }
 

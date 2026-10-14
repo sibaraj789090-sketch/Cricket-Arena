@@ -7,23 +7,23 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
-import { ludoRouter } from './src/server/ludoMatchServer';
-import { ludoBotRouter } from './src/server/ludoBotRouter';
-import { userAuthRouter } from './src/server/userAuthServer';
+import { ludoRouter } from './src/server/ludoMatchServer.ts';
+import { ludoBotRouter } from './src/server/ludoBotRouter.ts';
+import { userAuthRouter } from './src/server/userAuthServer.ts';
 import {
   serverCashRequests,
   serverPlayerRestrictions,
   checkUserBanStatus,
-} from './src/server/adminControlServer';
+} from './src/server/adminControlServer.ts';
 import {
   requireAdminRole,
   handleAdminLogin,
   handleAdminLogout,
   handleAdminCheck,
-} from './src/server/adminAuthServer';
-import { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl';
-import { WithdrawalRequest, PayoutMethod } from './src/types/wallet';
-import { INITIAL_WITHDRAWALS } from './src/lib/walletData';
+} from './src/server/adminAuthServer.ts';
+import { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl.ts';
+import { WithdrawalRequest, PayoutMethod } from './src/types/wallet.ts';
+import { INITIAL_WITHDRAWALS } from './src/lib/walletData.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1671,8 +1671,9 @@ app.post('/api/admin/wallet/adjust', requireAdminRole, (req: Request, res: Respo
 async function startServer() {
   const httpServer = http.createServer(app);
 
-  if (!isProduction) {
-    const { createServer: createViteServer } = await import('vite');
+  if (!isProduction && !isServerless) {
+    const vitePackage = 'vite';
+    const { createServer: createViteServer } = await import(vitePackage);
     const vite = await createViteServer({
       server: {
         middlewareMode: true,

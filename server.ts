@@ -637,11 +637,12 @@ app.post('/api/wallet/create-order', async (req: Request, res: Response) => {
       const cleanEmail = (customerEmail && String(customerEmail).includes('@')) ? String(customerEmail).trim() : 'player@cricketarena.in';
       const cleanName = String(customerName || 'Arena Player').trim() || 'Arena Player';
 
-      // Detect host and protocol for safe return_url
+      // Detect host and protocol for safe return_url. Cashfree Production strictly mandates HTTPS return_url.
       const host = req.get('host') || 'cricketarena.in';
-      const protoHeader = (req.headers['x-forwarded-proto'] as string) || '';
-      const protocol = protoHeader.includes('https') ? 'https' : (req.secure ? 'https' : 'http');
-      const origin = `${protocol}://${host}`;
+      const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+      const origin = isLocal || !host.includes('.')
+        ? 'https://cricketarena.in'
+        : `https://${host}`;
 
       const orderMeta: Record<string, string> = {
         return_url: `${origin}/?order_id={order_id}`,

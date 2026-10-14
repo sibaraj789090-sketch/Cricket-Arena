@@ -147,9 +147,35 @@ export interface UserProfile {
   avatar?: string;
   avatarUrl?: string;
   joinedAt?: string;
+  referralCode?: string;
+  referredBy?: string;
+  referralsCount?: number;
+  totalReferralEarnings?: number;
   joinedTournamentsCount: number;
   totalFantasyPoints: number;
   createdTeamsCount: number;
+}
+
+export interface ReferralRecord {
+  id: string;
+  referrerId: string;
+  referrerCode: string;
+  refereeId: string;
+  refereeName: string;
+  refereeIdentifier: string; // masked email or phone, e.g. "ro***@gmail.com"
+  bonusCoins: number;
+  status: 'completed' | 'pending';
+  createdAt: string;
+}
+
+export interface ReferralStats {
+  referralCode: string;
+  inviteLink: string;
+  referralsCount: number;
+  totalBonusEarned: number;
+  bonusPerReferral: number;
+  refereeWelcomeBonus: number;
+  referrals: ReferralRecord[];
 }
 
 // ==========================================

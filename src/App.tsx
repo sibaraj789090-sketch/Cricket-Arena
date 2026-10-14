@@ -39,6 +39,8 @@ import { LudoCashLobbyView } from './components/ludo/LudoCashLobbyView';
 import { LudoOnlineMatchView } from './components/ludo/LudoOnlineMatchView';
 import { LudoTournamentView } from './components/ludo/LudoTournamentView';
 import { WalletModal } from './components/wallet/WalletModal';
+import { AuthModal } from './components/auth/AuthModal';
+import { ReferAndEarnModal } from './components/referral/ReferAndEarnModal';
 
 function CricketArenaApp() {
   const { user, isAdmin } = useAuth();
@@ -54,6 +56,9 @@ function CricketArenaApp() {
   // Modals
   const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
   const [showWalletModal, setShowWalletModal] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [showReferModal, setShowReferModal] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login');
   const [rulesDefaultSection, setRulesDefaultSection] = useState<'rules' | 'points' | 'terms' | 'privacy' | 'contact'>('rules');
 
   // Tournaments filter
@@ -71,6 +76,11 @@ function CricketArenaApp() {
   const handleOpenRules = (section: 'rules' | 'points' | 'terms' | 'privacy' | 'contact' = 'rules') => {
     setRulesDefaultSection(section);
     setShowRulesModal(true);
+  };
+
+  const handleOpenAuth = (mode: 'login' | 'signup' = 'login') => {
+    setAuthModalMode(mode);
+    setShowAuthModal(true);
   };
 
   const handleOpenLeaderboard = (tournament: Tournament) => {
@@ -100,6 +110,9 @@ function CricketArenaApp() {
         onOpenRules={() => handleOpenRules('terms')}
         onOpenAdmin={() => setCurrentTab('admin')}
         onOpenWallet={() => setShowWalletModal(true)}
+        onOpenAuth={() => handleOpenAuth('login')}
+        onOpenProfile={() => setCurrentTab('profile')}
+        onOpenRefer={() => setShowReferModal(true)}
         activeGameMode={activeGameMode}
         onToggleGameMode={(mode) => {
           setActiveGameMode(mode);
@@ -548,6 +561,7 @@ function CricketArenaApp() {
             onOpenRules={() => handleOpenRules('terms')}
             onOpenAdmin={() => setCurrentTab('admin')}
             onOpenWallet={() => setShowWalletModal(true)}
+            onOpenRefer={() => setShowReferModal(true)}
           />
         )}
 
@@ -633,6 +647,22 @@ function CricketArenaApp() {
       <WalletModal
         isOpen={showWalletModal}
         onClose={() => setShowWalletModal(false)}
+        onOpenRefer={() => setShowReferModal(true)}
+      />
+
+      {/* 6. User Sign Up and Login Modal (No OTP) */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        initialMode={authModalMode}
+        onSuccessRedirect={() => setCurrentTab('profile')}
+      />
+
+      {/* 7. Refer & Earn Modal */}
+      <ReferAndEarnModal
+        isOpen={showReferModal}
+        onClose={() => setShowReferModal(false)}
+        onOpenAuth={handleOpenAuth}
       />
     </div>
   );

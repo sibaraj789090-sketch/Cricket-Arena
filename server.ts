@@ -21,6 +21,8 @@ import {
   handleAdminCheck,
 } from './src/server/adminAuthServer';
 import { CashAdditionRequest, PlayerRestriction, RestrictionType } from './src/types/adminControl';
+import { WithdrawalRequest, PayoutMethod } from './src/types/wallet';
+import { INITIAL_WITHDRAWALS } from './src/lib/walletData';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -535,16 +537,262 @@ app.post('/api/admin/wallet/packages', requireAdminRole, (req: Request, res: Res
 });
 
 // ==========================================
-// MANUAL CASH ADDITION REQUESTS & BANS SYSTEM
-// (Withdrawal functionality removed; pure skill gaming credits)
+// SECURE WITHDRAWAL REQUESTS & VERIFICATION SYSTEM
 // ==========================================
 
-// Prohibit Withdrawal Requests
+export const serverWithdrawals = new Map<string, WithdrawalRequest>();
+
+// Seed initial sample withdrawals
+INITIAL_WITHDRAWALS.forEach((w) => {
+  serverWithdrawals.set(w.id, { ...w });
+});
+
+// User Submits Withdrawal Request (Atomic, Pending Admin Approval)
 app.post('/api/wallet/request-withdrawal', (req: Request, res: Response) => {
-  return res.status(400).json({
-    error: 'Withdrawals are not supported on this platform. Real Cash coins are non-redeemable skill gaming credits.',
-    success: false,
+  const { userId, userName, userEmail, amountInr, payoutMethod, payoutDetails } = req.body;
+
+  if (!userId || !amountInr || !payoutMethod || !payoutDetails) {
+    return res.status(400).json({
+      success: false,
+      error: 'User ID, withdrawal amount, payout method, and payout details are required.',
+    });
+  }
+
+  // Enforce ban / player restriction check
+  const banStatus = checkUserBanStatus(userId, 'all');
+  if (banStatus.banned) {
+    return res.status(403).json({
+      success: false,
+      error: `Your account is restricted (${banStatus.reason || 'Restricted by administrator'}). Withdrawals are suspended.`,
+    });
+  }
+
+  const amt = Number(amountInr);
+  if (isNaN(amt) || !Number.isFinite(amt) || amt <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Withdrawal amount must be a valid positive number.',
+    });
+  }
+
+  if (amt < serverWalletSettings.minWithdrawalInr) {
+    return res.status(400).json({
+      success: false,
+      error: `Minimum withdrawal limit is ₹${serverWalletSettings.minWithdrawalInr}.`,
+    });
+  }
+
+  if (amt > serverWalletSettings.maxWithdrawalInr) {
+    return res.status(400).json({
+      success: false,
+      error: `Maximum withdrawal limit is ₹${serverWalletSettings.maxWithdrawalInr}.`,
+    });
+  }
+
+  // Validate payout method & required details
+  if (payoutMethod === 'upi') {
+    const upiId = String(payoutDetails.upiId || '').trim();
+    if (!upiId || !upiId.includes('@') || upiId.length < 5) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please enter a valid UPI ID (e.g., username@oksbi, 9876543210@paytm).',
+      });
+    }
+  } else if (payoutMethod === 'bank_transfer') {
+    const accHolder = String(payoutDetails.accountHolderName || '').trim();
+    const accNum = String(payoutDetails.bankAccountNumber || '').trim();
+    const ifsc = String(payoutDetails.ifscCode || '').trim();
+
+    if (!accHolder || accHolder.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Account holder name is required and must match your bank account.',
+      });
+    }
+    if (!accNum || accNum.length < 6 || !/^\d+$/.test(accNum)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please enter a valid numerical bank account number (at least 6 digits).',
+      });
+    }
+    if (!ifsc || ifsc.length < 4) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please enter a valid bank IFSC code.',
+      });
+    }
+  } else {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid payout method. Please choose UPI or Direct Bank Transfer.',
+    });
+  }
+
+  const requestId = `wdr-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+  const referenceId = `WDR-REF-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const newWithdrawal: WithdrawalRequest = {
+    id: requestId,
+    userId,
+    userName: userName || 'Arena Player',
+    userEmail: userEmail || 'player@arena.com',
+    amountCoins: Math.floor(amt),
+    amountInr: Math.floor(amt),
+    payoutMethod: payoutMethod as PayoutMethod,
+    payoutDetails: {
+      upiId: payoutDetails.upiId ? String(payoutDetails.upiId).trim() : undefined,
+      accountHolderName: payoutDetails.accountHolderName ? String(payoutDetails.accountHolderName).trim() : undefined,
+      bankAccountNumber: payoutDetails.bankAccountNumber ? String(payoutDetails.bankAccountNumber).trim() : undefined,
+      ifscCode: payoutDetails.ifscCode ? String(payoutDetails.ifscCode).trim().toUpperCase() : undefined,
+      bankName: payoutDetails.bankName ? String(payoutDetails.bankName).trim() : undefined,
+    },
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  serverWithdrawals.set(requestId, newWithdrawal);
+
+  // Authoritative server audit trail
+  serverAuditLogs.unshift({
+    id: `audit-wdr-${Date.now()}`,
+    adminId: 'system',
+    adminName: newWithdrawal.userName,
+    action: 'WITHDRAWAL_REQUESTED',
+    targetType: 'withdrawal',
+    targetId: requestId,
+    details: `Withdrawal request submitted: ₹${newWithdrawal.amountInr} via ${payoutMethod.toUpperCase()} (${referenceId}). Pending admin review.`,
+    timestamp: new Date().toISOString(),
   });
+
+  return res.json({
+    success: true,
+    requestId,
+    referenceId,
+    withdrawal: newWithdrawal,
+    message: `Withdrawal request for ₹${newWithdrawal.amountInr} received. It is pending review by finance administrators.`,
+  });
+});
+
+// Admin Review / Decision on Withdrawal Request (Approve or Reject & Refund)
+app.post('/api/admin/wallet/withdrawal/action', requireAdminRole, (req: Request, res: Response) => {
+  const {
+    requestId,
+    action,
+    adminNotes = '',
+    payoutReferenceId = '',
+    adminName = 'Finance Admin',
+  } = req.body;
+
+  if (!requestId || !['approve', 'reject'].includes(action)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Valid requestId and action (approve/reject) are required.',
+    });
+  }
+
+  const withdrawal = serverWithdrawals.get(requestId);
+  if (!withdrawal) {
+    // If not in server in-memory cache, log and return success so client store and Supabase proceed
+    serverAuditLogs.unshift({
+      id: `audit-wdr-ext-${Date.now()}`,
+      adminId: 'admin-master',
+      adminName,
+      action: action === 'approve' ? 'WITHDRAWAL_APPROVED' : 'WITHDRAWAL_REJECTED',
+      targetType: 'withdrawal',
+      targetId: requestId,
+      details: `Admin ${action}d withdrawal ${requestId}. Note: ${adminNotes}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      message: `Withdrawal action ${action} recorded.`,
+    });
+  }
+
+  // Idempotency check: exactly-once decision
+  if (withdrawal.status !== 'pending') {
+    return res.status(400).json({
+      success: false,
+      error: `Withdrawal request has already been processed with status: ${withdrawal.status}. Duplicate processing prevented.`,
+      alreadyProcessed: true,
+    });
+  }
+
+  if (action === 'approve') {
+    withdrawal.status = 'approved';
+    withdrawal.adminNotes = String(adminNotes).trim() || 'Verified and transferred.';
+    withdrawal.payoutReferenceId = String(payoutReferenceId).trim() || `UTR-${Date.now()}`;
+    withdrawal.processedAt = new Date().toISOString();
+    withdrawal.processedBy = adminName;
+
+    serverAuditLogs.unshift({
+      id: `audit-wdr-appv-${Date.now()}`,
+      adminId: 'admin-master',
+      adminName,
+      action: 'WITHDRAWAL_APPROVED',
+      targetType: 'withdrawal',
+      targetId: requestId,
+      details: `Approved payout of ₹${withdrawal.amountInr} to ${withdrawal.userName} (${withdrawal.payoutMethod.toUpperCase()}). Ref: ${withdrawal.payoutReferenceId}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      withdrawal,
+      message: `Withdrawal for ₹${withdrawal.amountInr} approved and marked as transferred.`,
+    });
+  } else {
+    withdrawal.status = 'rejected';
+    withdrawal.adminNotes = String(adminNotes).trim() || 'Declined by administration. Coins refunded.';
+    withdrawal.processedAt = new Date().toISOString();
+    withdrawal.processedBy = adminName;
+
+    serverAuditLogs.unshift({
+      id: `audit-wdr-rej-${Date.now()}`,
+      adminId: 'admin-master',
+      adminName,
+      action: 'WITHDRAWAL_REJECTED',
+      targetType: 'withdrawal',
+      targetId: requestId,
+      details: `Declined withdrawal of ₹${withdrawal.amountInr} for ${withdrawal.userName}. Coins refunded. Reason: ${withdrawal.adminNotes}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      withdrawal,
+      message: `Withdrawal declined. ${withdrawal.amountCoins} coins refunded to user wallet.`,
+    });
+  }
+});
+
+// User Views Own Withdrawals
+app.get('/api/wallet/withdrawals/:userId', (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const list: WithdrawalRequest[] = [];
+
+  for (const w of serverWithdrawals.values()) {
+    if (w.userId === userId) {
+      list.push(w);
+    }
+  }
+
+  list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json({ success: true, withdrawals: list });
+});
+
+// Admin Views All Withdrawals Queue
+app.get('/api/admin/wallet/withdrawals', requireAdminRole, (req: Request, res: Response) => {
+  const { status } = req.query;
+  let list = Array.from(serverWithdrawals.values());
+
+  if (status && status !== 'all') {
+    list = list.filter((w) => w.status === status);
+  }
+
+  list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json({ success: true, withdrawals: list });
 });
 
 // User Submits Manual Cash Addition Request (NEVER auto-credited)

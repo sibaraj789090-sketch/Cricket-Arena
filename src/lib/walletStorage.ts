@@ -151,6 +151,29 @@ export class WalletDataStore {
     saveToStorage(KEYS.TRANSACTIONS, txs);
   }
 
+  static creditReferralReward(userId: string, friendName: string, amount: number = 50): { success: boolean; newBalance: number } {
+    const current = this.getWallet(userId);
+    const oldBalance = current.balance;
+    const newBalance = oldBalance + amount;
+    current.balance = newBalance;
+    this.saveWallet(current);
+
+    this.addTransaction({
+      id: `tx-ref-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      userId,
+      type: 'referral_bonus',
+      amount,
+      status: 'completed',
+      balanceBefore: oldBalance,
+      balanceAfter: newBalance,
+      referenceId: `REF-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      description: `Refer & Earn Reward: ${amount} bonus coins earned for inviting ${friendName}!`,
+      createdAt: new Date().toISOString(),
+    });
+
+    return { success: true, newBalance };
+  }
+
   // Withdrawals
   static getWithdrawals(userId?: string): WithdrawalRequest[] {
     const list = loadFromStorage<WithdrawalRequest[]>(KEYS.WITHDRAWALS, INITIAL_WITHDRAWALS);

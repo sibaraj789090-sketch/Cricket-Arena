@@ -31,7 +31,7 @@ interface WalletContextType {
     amountInr: number,
     payoutMethod: PayoutMethod,
     payoutDetails: WithdrawalRequest['payoutDetails']
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; request?: WithdrawalRequest }>;
   adminApproveWithdrawal: (
     requestId: string,
     adminNotes: string,
@@ -395,7 +395,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       await refreshWallet();
       setIsLoading(false);
-      return { success: true };
+      return { success: true, request: localResult.request };
     } catch (err: any) {
       setIsLoading(false);
       return { success: false, error: err?.message || 'Withdrawal request failed.' };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Download, UserCheck, Wifi, WifiOff, Coins, LogIn, User } from 'lucide-react';
+import { ShieldCheck, Download, UserCheck, Wifi, WifiOff, Coins, LogIn, User, Gift } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
@@ -11,6 +11,7 @@ interface HeaderProps {
   onOpenWallet: () => void;
   onOpenAuth?: () => void;
   onOpenProfile?: () => void;
+  onOpenRefer?: () => void;
   activeGameMode?: 'cricket' | 'ludo';
   onToggleGameMode?: (mode: 'cricket' | 'ludo') => void;
 }
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenWallet,
   onOpenAuth,
   onOpenProfile,
+  onOpenRefer,
   activeGameMode = 'cricket',
   onToggleGameMode,
 }) => {
@@ -154,6 +156,21 @@ export const Header: React.FC<HeaderProps> = ({
               )
             )}
 
+            {/* Refer & Earn Quick Action */}
+            {onOpenRefer && (
+              <button
+                onClick={onOpenRefer}
+                className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black px-2.5 py-1 rounded-xl text-xs transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
+                title="Refer Friends & Earn ₹50 Bonus Coins"
+              >
+                <Gift className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Refer &amp; Earn</span>
+                <span className="bg-slate-950 text-amber-300 text-[10px] px-1 py-0.2 rounded font-mono font-black">
+                  ₹50
+                </span>
+              </button>
+            )}
+
             {/* Authenticated Admin Portal Button (Only visible after verified admin authentication) */}
             {isAdmin && (
               <button
@@ -178,6 +195,18 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {onOpenRefer && (
+              <>
+                <button
+                  onClick={onOpenRefer}
+                  className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Gift className="w-3 h-3 text-amber-400" />
+                  <span>Refer &amp; Earn ₹50</span>
+                </button>
+                <span className="text-slate-600">•</span>
+              </>
+            )}
             <button
               onClick={onOpenWallet}
               className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"

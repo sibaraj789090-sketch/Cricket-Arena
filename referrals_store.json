@@ -1,0 +1,35 @@
+[
+  {
+    "id": "ref_1791964975888_65727d",
+    "referrerId": "usr-demo-player-1",
+    "referrerCode": "ROHIT77",
+    "refereeId": "usr_1791964975888_73a8fbc5",
+    "refereeName": "Shubman Gill",
+    "refereeIdentifier": "sh***@gmail.com",
+    "bonusCoins": 50,
+    "status": "completed",
+    "createdAt": "2026-10-14T08:02:55.888Z"
+  },
+  {
+    "id": "ref-demo-1",
+    "referrerId": "usr-demo-player-1",
+    "referrerCode": "ROHIT77",
+    "refereeId": "usr-ref-1",
+    "refereeName": "Aman Sharma",
+    "refereeIdentifier": "am***@gmail.com",
+    "bonusCoins": 50,
+    "status": "completed",
+    "createdAt": "2026-10-12T08:02:33.049Z"
+  },
+  {
+    "id": "ref-demo-2",
+    "referrerId": "usr-demo-player-1",
+    "referrerCode": "ROHIT77",
+    "refereeId": "usr-ref-2",
+    "refereeName": "Vikas Kumar",
+    "refereeIdentifier": "98******42",
+    "bonusCoins": 50,
+    "status": "completed",
+    "createdAt": "2026-10-09T08:02:33.049Z"
+  }
+]

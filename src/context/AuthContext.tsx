@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserProfile } from '../types';
+import { UserProfile, ReferralStats } from '../types';
 import { DEMO_USER_PROFILE } from '../lib/initialData';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { WalletDataStore } from '../lib/walletStorage';
 import {
   setAdminSession,
   clearAdminSession,
@@ -15,6 +16,7 @@ export interface RegisterParams {
   email?: string;
   phone?: string;
   password: string;
+  referralCode?: string;
 }
 
 export interface LoginParams {
@@ -27,14 +29,18 @@ interface AuthContextType {
   isAdmin: boolean;
   isLoading: boolean;
   isGuest: boolean;
+  capturedReferralCode: string;
+  setCapturedReferralCode: (code: string) => void;
   loginAsGuest: () => void;
   loginAdmin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logoutAdmin: () => Promise<void>;
-  registerUser: (params: RegisterParams) => Promise<{ success: boolean; error?: string; user?: UserProfile }>;
+  registerUser: (params: RegisterParams) => Promise<{ success: boolean; error?: string; user?: UserProfile; referralApplied?: boolean; referrerName?: string }>;
   loginUser: (params: LoginParams) => Promise<{ success: boolean; error?: string; user?: UserProfile }>;
   loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   loginWithPhone: (phone: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signUpWithEmail: (email: string, password: string, name: string, phone?: string) => Promise<{ success: boolean; error?: string }>;
+  signUpWithEmail: (email: string, password: string, name: string, phone?: string, referralCode?: string) => Promise<{ success: boolean; error?: string }>;
+  getReferralStats: (userId?: string) => Promise<ReferralStats | null>;
+  validateReferralCode: (code: string) => Promise<{ valid: boolean; referrerName?: string; welcomeBonusCoins?: number; error?: string }>;
   logout: () => Promise<void>;
   updateProfileName: (name: string) => void;
 }
@@ -56,6 +62,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [capturedReferralCode, setCapturedReferralCode] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('cricket_arena_referral_code') || '';
+  });
+
+  // Capture referral code from URL if user arrived via invite link (?ref=CODE or ?referral=CODE)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('ref') || urlParams.get('referral');
+      if (code) {
+        const clean = code.trim().toUpperCase();
+        localStorage.setItem('cricket_arena_referral_code', clean);
+        setCapturedReferralCode(clean);
+      }
+    } catch (e) {
+      console.warn('[AuthContext] Failed to parse referral URL param:', e);
+    }
+  }, []);
 
   // Validate admin token on mount
   useEffect(() => {
@@ -307,13 +333,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // Register with Name, Email (optional if phone provided), Phone (optional if email provided), Password (No OTP)
-  const registerUser = async (params: RegisterParams): Promise<{ success: boolean; error?: string; user?: UserProfile }> => {
+  const registerUser = async (
+    params: RegisterParams
+  ): Promise<{ success: boolean; error?: string; user?: UserProfile; referralApplied?: boolean; referrerName?: string }> => {
     setIsLoading(true);
     try {
+      const payload = {
+        ...params,
+        referralCode: params.referralCode || capturedReferralCode || undefined,
+      };
+
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        body: JSON.stringify(payload),
       });
 
       const text = await res.text();
@@ -332,9 +365,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem(USER_TOKEN_KEY, data.token);
       }
 
+      // If registered with a referral code, credit bonus coins in wallet storage for referee
+      if (data.referralApplied && data.user?.id) {
+        WalletDataStore.creditReferralReward(
+          data.user.id,
+          data.referrerName ? `${data.referrerName}'s Referral Invite` : 'Welcome Bonus',
+          50
+        );
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('cricket_arena_referral_code');
+          setCapturedReferralCode('');
+        }
+      }
+
       saveUserSession(data.user);
       setIsLoading(false);
-      return { success: true, user: data.user };
+      return {
+        success: true,
+        user: data.user,
+        referralApplied: data.referralApplied,
+        referrerName: data.referrerName,
+      };
     } catch (err: any) {
       setIsLoading(false);
       return {
@@ -402,10 +453,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string,
     password: string,
     name: string,
-    phone?: string
+    phone?: string,
+    referralCode?: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const res = await registerUser({ name, email, phone, password });
+    const res = await registerUser({ name, email, phone, password, referralCode });
     return { success: res.success, error: res.error };
+  };
+
+  const getReferralStats = async (targetUserId?: string): Promise<ReferralStats | null> => {
+    try {
+      const uid = targetUserId || user?.id;
+      if (!uid || uid === 'user-demo-guest') return null;
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem(USER_TOKEN_KEY) : null;
+      const res = await fetch(`/api/auth/referrals/${uid}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.success) {
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'https://cricketarena.app';
+        return {
+          ...data,
+          inviteLink: `${origin}?ref=${data.referralCode}`,
+        };
+      }
+      return null;
+    } catch (err) {
+      console.warn('[AuthContext] getReferralStats error:', err);
+      return null;
+    }
+  };
+
+  const validateReferralCode = async (
+    code: string
+  ): Promise<{ valid: boolean; referrerName?: string; welcomeBonusCoins?: number; error?: string }> => {
+    try {
+      const clean = code.trim().toUpperCase();
+      if (!clean) return { valid: false, error: 'Code cannot be empty.' };
+      const res = await fetch(`/api/auth/validate-referral/${encodeURIComponent(clean)}`);
+      const data = await res.json();
+      return data;
+    } catch {
+      return { valid: false, error: 'Failed to validate referral code.' };
+    }
   };
 
   // General Logout
@@ -455,6 +546,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAdmin,
         isLoading,
         isGuest,
+        capturedReferralCode,
+        setCapturedReferralCode,
         loginAsGuest,
         loginAdmin,
         logoutAdmin,
@@ -463,6 +556,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithEmail,
         loginWithPhone,
         signUpWithEmail,
+        getReferralStats,
+        validateReferralCode,
         logout,
         updateProfileName,
       }}

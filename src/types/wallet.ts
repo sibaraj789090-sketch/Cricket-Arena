@@ -2,6 +2,7 @@ export type TransactionType =
   | 'deposit'
   | 'withdrawal'
   | 'starting_bonus'
+  | 'referral_bonus'
   | 'game_fee'
   | 'game_reward'
   | 'admin_adjustment';

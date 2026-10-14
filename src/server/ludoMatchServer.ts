@@ -33,6 +33,16 @@ import {
 } from './ludoBotEngine';
 import { requireAdminRole } from './adminAuthServer';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import crypto from 'crypto';
+
+export function toSafeUuid(id: string): string {
+  if (!id) return '00000000-0000-0000-0000-000000000000';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return id.toLowerCase();
+  }
+  const hash = crypto.createHash('md5').update(id).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
 
 export const ludoRouter = express.Router();
 
@@ -327,6 +337,84 @@ export function clearQueueTimer(tableId: string) {
   }
 }
 
+export function syncMatchToSupabase(match: LudoCashMatch) {
+  if (!isSupabaseConfigured || !supabase) return;
+  try {
+    const realPlayerIds = match.players
+      .map((p) => p.userId)
+      .filter((uid) => uid && !uid.startsWith('bot-'))
+      .map(toSafeUuid);
+
+    Promise.resolve(
+      supabase
+        .from('ludo_table_matches')
+        .upsert({
+          id: match.id,
+          table_id: match.tableId,
+          status: match.status,
+          max_players: match.playerCount,
+          player_ids: realPlayerIds,
+          players_data: match.players,
+          game_state: match.gameState,
+          created_at: match.createdAt,
+          updated_at: new Date().toISOString(),
+        })
+    ).then(
+      ({ error }: any) => {
+        if (error) console.warn('[LudoMatchServer] Supabase syncMatch warning:', error.message);
+      },
+      (err: any) => console.warn('[LudoMatchServer] Supabase syncMatch network error:', err)
+    );
+  } catch (err) {
+    console.warn('[LudoMatchServer] Failed to sync match to Supabase:', err);
+  }
+}
+
+export function buildMatchFromDb(dbRow: any): LudoCashMatch {
+  const table = cashTables.find((t) => t.id === dbRow.table_id) || {
+    id: dbRow.table_id,
+    entryFee: 10,
+    mode: (dbRow.max_players || 2) as 2 | 4,
+    prize: (dbRow.max_players || 2) === 2 ? 17.5 : 35,
+    isActive: true,
+    minBalanceRequired: 10,
+    waitingPlayers: 0,
+    activeMatches: 1,
+    status: 'in_progress',
+    onlinePlayers: 2,
+    playingPlayers: 2,
+    current_players: 4,
+  };
+
+  const durationMinutes =
+    table.mode === 2 ? (adminConfig.durationMinutes2P || 8) : (adminConfig.durationMinutes4P || 15);
+  const durationSeconds = durationMinutes * 60;
+  const startedAt = dbRow.created_at || new Date().toISOString();
+  const endsAt = new Date(new Date(startedAt).getTime() + durationSeconds * 1000).toISOString();
+
+  return {
+    id: dbRow.id,
+    tableId: dbRow.table_id,
+    entryFee: table.entryFee,
+    playerCount: table.mode,
+    prizeAmount: table.prize,
+    status: dbRow.status,
+    players: dbRow.players_data || [],
+    gameState: dbRow.game_state || createInitialLudoGame(table.mode),
+    createdAt: dbRow.created_at,
+    startedAt,
+    endsAt,
+    durationMinutes,
+    durationSeconds,
+    timeRemainingSeconds: Math.max(0, Math.floor((new Date(endsAt).getTime() - Date.now()) / 1000)),
+    modeName: 'Timer Ludo — Highest Score Wins',
+    scoreHistory: [],
+    tieBreakerRule: getTieBreakerDescription(adminConfig.tieBreakerRule),
+    turnDeadline: new Date(Date.now() + adminConfig.turnTimeoutSeconds * 1000).toISOString(),
+    chatMessages: [],
+  };
+}
+
 /**
  * Creates and starts an authoritative Timer Ludo match:
  * Sets exact match duration (2P = 8 min, 4P = 15 min),
@@ -408,33 +496,7 @@ export function createAndStartMatch(
   activeMatches.set(matchId, newMatch);
   updateTableQueueStats();
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const realPlayerIds = matchedPlayers
-        .map((p) => p.userId)
-        .filter((uid) => uid && !uid.startsWith('bot-'));
-
-      supabase
-        .from('ludo_table_matches')
-        .upsert({
-          id: matchId,
-          table_id: table.id,
-          status: 'in_progress',
-          max_players: table.mode,
-          player_ids: realPlayerIds,
-          players_data: onlinePlayers,
-          game_state: initialGame,
-          created_at: newMatch.createdAt,
-          updated_at: new Date().toISOString(),
-        })
-        .then(({ error }: any) => {
-          if (error) console.warn('[LudoMatchServer] Supabase ludo_table_matches upsert warning:', error.message);
-        })
-        .catch((err: any) => console.warn('[LudoMatchServer] Supabase upsert error:', err));
-    } catch (err) {
-      console.warn('[LudoMatchServer] Failed to persist match to Supabase:', err);
-    }
-  }
+  syncMatchToSupabase(newMatch);
 
   addBotLog({
     matchId,
@@ -857,8 +919,18 @@ ludoRouter.get('/tables', (req: Request, res: Response) => {
 });
 
 // 2. Join Matchmaking Queue (Locks entry fee on client via WalletContext & registers in server queue)
-ludoRouter.post('/queue/join', (req: Request, res: Response) => {
-  const { tableId, userId, userName, avatar } = req.body;
+ludoRouter.post('/queue/join', async (req: Request, res: Response) => {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {}
+  } else if (Buffer.isBuffer(body)) {
+    try {
+      body = JSON.parse(body.toString('utf8'));
+    } catch {}
+  }
+  const { tableId, userId, userName, avatar } = body || {};
 
   if (!adminConfig.onlineLudoEnabled) {
     return res.status(403).json({ error: 'Online Ludo is temporarily paused by administrator.' });
@@ -883,7 +955,7 @@ ludoRouter.post('/queue/join', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Selected cash table is inactive or unavailable.' });
   }
 
-  // Check if user is already playing in an active match
+  // Check if user is already playing in an active match (in memory first)
   for (const [mId, m] of activeMatches.entries()) {
     if (m.status === 'in_progress' && m.players.some((p) => p.userId === userId)) {
       return res.json({
@@ -896,14 +968,139 @@ ludoRouter.post('/queue/join', (req: Request, res: Response) => {
     }
   }
 
-  // Get or create queue
+  // Persistent Supabase Queue Flow (Handles distributed serverless instances on Vercel)
+  if (isSupabaseConfigured && supabase) {
+    try {
+      // 1. Check if user already has an active match in Supabase
+      const { data: dbMatches } = await supabase
+        .from('ludo_table_matches')
+        .select('*')
+        .eq('status', 'in_progress')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (dbMatches && dbMatches.length > 0) {
+        for (const dbMatch of dbMatches) {
+          const players: LudoOnlinePlayer[] = dbMatch.players_data || [];
+          if (players.some((p) => p.userId === userId)) {
+            const reconstructed = buildMatchFromDb(dbMatch);
+            activeMatches.set(reconstructed.id, reconstructed);
+            return res.json({
+              success: true,
+              alreadyInMatch: true,
+              matchId: reconstructed.id,
+              match: reconstructed,
+              message: 'Reconnected to your active match in progress.',
+            });
+          }
+        }
+      }
+
+      // 2. Clean up any stale waiting queue entries for this user on other tables
+      await supabase
+        .from('ludo_matchmaking_queue')
+        .delete()
+        .eq('user_id', userId)
+        .eq('status', 'waiting');
+
+      // 3. Insert current player into Supabase queue
+      const { error: insertErr } = await supabase.from('ludo_matchmaking_queue').insert({
+        table_id: tableId,
+        user_id: userId,
+        user_name: userName || 'Player',
+        avatar: avatar || null,
+        mode: table.mode,
+        status: 'waiting',
+        joined_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (insertErr) {
+        console.warn('[LudoMatchServer] Supabase queue insert warning, using memory fallback:', insertErr.message);
+      } else {
+        // 4. Query all waiting players for this table
+        const { data: waitingRows } = await supabase
+          .from('ludo_matchmaking_queue')
+          .select('*')
+          .eq('table_id', tableId)
+          .eq('status', 'waiting')
+          .order('joined_at', { ascending: true });
+
+        const queueCount = waitingRows?.length || 1;
+
+        // Check if queue has enough players to launch match immediately (2P or 4P)
+        if (waitingRows && waitingRows.length >= table.mode) {
+          clearQueueTimer(tableId);
+          const matchedRows = waitingRows.slice(0, table.mode);
+          const matchedIds = matchedRows.map((r: any) => r.id);
+          const matchedPlayers: QueuedPlayer[] = matchedRows.map((r: any) => ({
+            userId: r.user_id,
+            userName: r.user_name,
+            avatar: r.avatar,
+            joinedAt: r.joined_at,
+            isSimulated: false,
+          }));
+
+          const newMatch = createAndStartMatch(table, matchedPlayers, false);
+
+          // Mark queue rows as matched in Supabase
+          await supabase
+            .from('ludo_matchmaking_queue')
+            .update({
+              status: 'matched',
+              match_id: newMatch.id,
+              updated_at: new Date().toISOString(),
+            })
+            .in('id', matchedIds);
+
+          return res.json({
+            success: true,
+            status: 'starting',
+            matchId: newMatch.id,
+            match: newMatch,
+            message: `Match starting with ${table.mode} players!`,
+          });
+        }
+
+        // Add to local memory queue to keep stats updated
+        let memQueue = waitingQueues.get(tableId);
+        if (!memQueue) {
+          memQueue = [];
+          waitingQueues.set(tableId, memQueue);
+        }
+        if (!memQueue.some((p) => p.userId === userId)) {
+          memQueue.push({
+            userId,
+            userName: userName || 'Player',
+            avatar,
+            joinedAt: new Date().toISOString(),
+            isSimulated: false,
+          });
+        }
+        updateTableQueueStats();
+        scheduleAutoMatchStealthBots(tableId);
+
+        return res.json({
+          success: true,
+          status: 'waiting',
+          queuePosition: queueCount,
+          totalWaiting: queueCount,
+          needed: table.mode,
+          message: `Joined queue (${queueCount}/${table.mode}). Searching for players...`,
+        });
+      }
+    } catch (dbErr) {
+      console.warn('[LudoMatchServer] Supabase queue operation error, using memory fallback:', dbErr);
+    }
+  }
+
+  // In-Memory Fallback Queue (offline/local preview mode)
   let queue = waitingQueues.get(tableId);
   if (!queue) {
     queue = [];
     waitingQueues.set(tableId, queue);
   }
 
-  // Check if user already in this queue
   const existingIdx = queue.findIndex((p) => p.userId === userId);
   if (existingIdx !== -1) {
     return res.json({
@@ -916,7 +1113,6 @@ ludoRouter.post('/queue/join', (req: Request, res: Response) => {
     });
   }
 
-  // Add to queue
   const newPlayer: QueuedPlayer = {
     userId,
     userName: userName || 'Player',
@@ -927,7 +1123,6 @@ ludoRouter.post('/queue/join', (req: Request, res: Response) => {
   queue.push(newPlayer);
   updateTableQueueStats();
 
-  // Check if queue has enough players to launch match immediately with real players
   if (queue.length >= table.mode) {
     clearQueueTimer(tableId);
     const matchedPlayers = queue.splice(0, table.mode);
@@ -942,8 +1137,6 @@ ludoRouter.post('/queue/join', (req: Request, res: Response) => {
     });
   }
 
-  // Schedule automatic matchmaking: If no other real player joins in 3s,
-  // stealth opponents automatically join so the user never has to wait!
   scheduleAutoMatchStealthBots(tableId);
 
   return res.json({
@@ -957,8 +1150,18 @@ ludoRouter.post('/queue/join', (req: Request, res: Response) => {
 });
 
 // 3. Simulate Opponent / Quick Match (For testing or instant matching)
-ludoRouter.post('/queue/simulate-opponent', (req: Request, res: Response) => {
-  const { tableId } = req.body;
+ludoRouter.post('/queue/simulate-opponent', async (req: Request, res: Response) => {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {}
+  } else if (Buffer.isBuffer(body)) {
+    try {
+      body = JSON.parse(body.toString('utf8'));
+    } catch {}
+  }
+  const { tableId, userId } = body || {};
   const table = cashTables.find((t) => t.id === tableId);
   if (!table) return res.status(404).json({ error: 'Table not found' });
 
@@ -969,14 +1172,74 @@ ludoRouter.post('/queue/simulate-opponent', (req: Request, res: Response) => {
     });
   }
 
+  clearQueueTimer(tableId);
+
+  // If Supabase is active, check persistent queue row
+  if (isSupabaseConfigured && supabase) {
+    try {
+      let userRowQuery = supabase
+        .from('ludo_matchmaking_queue')
+        .select('*')
+        .eq('table_id', tableId)
+        .eq('status', 'waiting');
+
+      if (userId) {
+        userRowQuery = userRowQuery.eq('user_id', userId);
+      }
+      const { data: userRows } = await userRowQuery.order('joined_at', { ascending: true }).limit(1);
+
+      if (userRows && userRows.length > 0) {
+        const uRow = userRows[0];
+        const matchedPlayers: QueuedPlayer[] = [
+          {
+            userId: uRow.user_id,
+            userName: uRow.user_name,
+            avatar: uRow.avatar,
+            joinedAt: uRow.joined_at,
+            isSimulated: false,
+          },
+        ];
+
+        while (matchedPlayers.length < table.mode) {
+          const stealth = generateStealthPlayer();
+          matchedPlayers.push({
+            userId: stealth.userId,
+            userName: stealth.userName,
+            avatar: stealth.avatar,
+            joinedAt: new Date().toISOString(),
+            isSimulated: true,
+          });
+        }
+
+        const newMatch = createAndStartMatch(table, matchedPlayers, false);
+
+        await supabase
+          .from('ludo_matchmaking_queue')
+          .update({
+            status: 'matched',
+            match_id: newMatch.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', uRow.id);
+
+        return res.json({
+          success: true,
+          status: 'starting',
+          matchId: newMatch.id,
+          match: newMatch,
+        });
+      }
+    } catch (err) {
+      console.warn('[LudoMatchServer] Supabase simulate opponent error:', err);
+    }
+  }
+
+  // In-memory queue fallback
   let queue = waitingQueues.get(tableId);
   if (!queue || queue.length === 0) {
     return res.status(400).json({ error: 'No human player waiting in this table queue to pair with.' });
   }
 
-  clearQueueTimer(tableId);
-
-  // Add realistic stealth players until table fills (natural human-like names and avatars)
   while (queue.length < table.mode) {
     const stealth = generateStealthPlayer();
     queue.push({
@@ -988,7 +1251,6 @@ ludoRouter.post('/queue/simulate-opponent', (req: Request, res: Response) => {
     });
   }
 
-  // Launch match immediately
   const matchedPlayers = queue.splice(0, table.mode);
   const newMatch = createAndStartMatch(table, matchedPlayers, false);
 
@@ -1001,11 +1263,38 @@ ludoRouter.post('/queue/simulate-opponent', (req: Request, res: Response) => {
 });
 
 // 4. Cancel Queue & 100% Refund
-ludoRouter.post('/queue/cancel', (req: Request, res: Response) => {
-  const { tableId, userId } = req.body;
+ludoRouter.post('/queue/cancel', async (req: Request, res: Response) => {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {}
+  } else if (Buffer.isBuffer(body)) {
+    try {
+      body = JSON.parse(body.toString('utf8'));
+    } catch {}
+  }
+  const { tableId, userId } = body || {};
   if (!tableId || !userId) return res.status(400).json({ error: 'tableId and userId required' });
 
   const table = cashTables.find((t) => t.id === tableId);
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase
+        .from('ludo_matchmaking_queue')
+        .update({
+          status: 'cancelled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .eq('table_id', tableId)
+        .eq('status', 'waiting');
+    } catch (err) {
+      console.warn('[LudoMatchServer] Supabase queue cancel error:', err);
+    }
+  }
+
   const queue = waitingQueues.get(tableId);
   if (queue) {
     const idx = queue.findIndex((p) => p.userId === userId);
@@ -1017,22 +1306,41 @@ ludoRouter.post('/queue/cancel', (req: Request, res: Response) => {
         waitingQueues.set(tableId, []);
       }
       updateTableQueueStats();
-      return res.json({
-        success: true,
-        refundAmount: table?.entryFee || 0,
-        message: 'Queue cancelled successfully. Reserved entry fee refunded 100%.',
-      });
     }
   }
 
-  return res.json({ success: true, refundAmount: table?.entryFee || 0 });
+  return res.json({
+    success: true,
+    refundAmount: table?.entryFee || 0,
+    message: 'Queue cancelled successfully. Reserved entry fee refunded 100%.',
+  });
 });
 
-// 5. Query Queue Status / Match Readiness
-ludoRouter.get('/queue/status', (req: Request, res: Response) => {
-  const { tableId, userId } = req.query as { tableId: string; userId: string };
+// 5. Query Queue Status / Match Readiness (Supports serverless Vercel polling & auto-matching)
+ludoRouter.get('/queue/status', async (req: Request, res: Response) => {
+  const tableId = ((req.query?.tableId || (req.body as any)?.tableId) as string) || '';
+  const userId = ((req.query?.userId || (req.body as any)?.userId) as string) || '';
 
-  // Check if match was created for this user
+  if (!tableId || !userId) {
+    return res.status(400).json({ error: 'tableId and userId required' });
+  }
+
+  const table = cashTables.find((t) => t.id === tableId) || {
+    id: tableId,
+    mode: 2 as 2 | 4,
+    entryFee: 10,
+    prize: 17.5,
+    isActive: true,
+    minBalanceRequired: 10,
+    waitingPlayers: 0,
+    activeMatches: 0,
+    status: 'waiting' as const,
+    onlinePlayers: 2,
+    playingPlayers: 2,
+    current_players: 4,
+  };
+
+  // Check in-memory active matches first
   for (const [mId, m] of activeMatches.entries()) {
     if (
       (m.status === 'starting' || m.status === 'in_progress') &&
@@ -1046,23 +1354,186 @@ ludoRouter.get('/queue/status', (req: Request, res: Response) => {
     }
   }
 
-  // Check waiting queue
+  // Persistent Supabase status check across Vercel instances
+  if (isSupabaseConfigured && supabase) {
+    try {
+      // 1. Check if user already has a matched queue record
+      const { data: matchedRows } = await supabase
+        .from('ludo_matchmaking_queue')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'matched')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (matchedRows && matchedRows.length > 0 && matchedRows[0].match_id) {
+        const matchId = matchedRows[0].match_id;
+        let match = activeMatches.get(matchId);
+
+        if (!match) {
+          const { data: dbMatch } = await supabase
+            .from('ludo_table_matches')
+            .select('*')
+            .eq('id', matchId)
+            .maybeSingle();
+
+          if (dbMatch) {
+            match = buildMatchFromDb(dbMatch);
+            activeMatches.set(matchId, match);
+          }
+        }
+
+        if (match) {
+          return res.json({
+            inMatch: true,
+            matchId,
+            match,
+          });
+        }
+      }
+
+      // 2. Check if user is in waiting status in Supabase queue
+      const { data: waitingRows } = await supabase
+        .from('ludo_matchmaking_queue')
+        .select('*')
+        .eq('table_id', tableId)
+        .eq('status', 'waiting')
+        .order('joined_at', { ascending: true });
+
+      if (waitingRows && waitingRows.length > 0) {
+        const userRowIndex = waitingRows.findIndex((r: any) => r.user_id === userId);
+        if (userRowIndex !== -1) {
+          const userRow = waitingRows[userRowIndex];
+          const waitDurationMs = Date.now() - new Date(userRow.joined_at).getTime();
+          const autoMatchWaitSec = (botPoolConfig.autoMatchWaitSeconds || 3) * 1000;
+
+          // In serverless environment, if wait time >= autoMatchWaitSeconds and bots enabled:
+          // automatically pair with realistic stealth opponents to ensure the player immediately joins a match!
+          if (
+            botPoolConfig.autoMatchStealthBots &&
+            LUDO_BOTS_ENABLED &&
+            waitDurationMs >= autoMatchWaitSec
+          ) {
+            clearQueueTimer(tableId);
+
+            const opponentsCount = table.mode - 1;
+            const opponents: QueuedPlayer[] = [];
+            for (let i = 0; i < opponentsCount; i++) {
+              const stealth = generateStealthPlayer();
+              opponents.push({
+                userId: stealth.userId,
+                userName: stealth.userName,
+                avatar: stealth.avatar,
+                joinedAt: new Date().toISOString(),
+                isSimulated: true,
+              });
+            }
+
+            const matchedPlayers: QueuedPlayer[] = [
+              {
+                userId: userRow.user_id,
+                userName: userRow.user_name,
+                avatar: userRow.avatar,
+                joinedAt: userRow.joined_at,
+                isSimulated: false,
+              },
+              ...opponents,
+            ];
+
+            const newMatch = createAndStartMatch(table, matchedPlayers, false);
+
+            await supabase
+              .from('ludo_matchmaking_queue')
+              .update({
+                status: 'matched',
+                match_id: newMatch.id,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', userRow.id);
+
+            return res.json({
+              inMatch: true,
+              matchId: newMatch.id,
+              match: newMatch,
+            });
+          }
+
+          return res.json({
+            inMatch: false,
+            inQueue: true,
+            queuePosition: userRowIndex + 1,
+            waitingCount: waitingRows.length,
+            needed: table.mode,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[LudoMatchServer] Supabase queue/status error:', err);
+    }
+  }
+
+  // In-Memory Fallback Check (handles offline or serverless instances)
   const queue = waitingQueues.get(tableId) || [];
   const pos = queue.findIndex((p) => p.userId === userId);
+
+  if (pos !== -1) {
+    const queuedUser = queue[pos];
+    const waitDurationMs = Date.now() - new Date(queuedUser.joinedAt).getTime();
+    const autoMatchWaitSec = (botPoolConfig.autoMatchWaitSeconds || 3) * 1000;
+
+    // Trigger auto-match on serverless poll if timer did not execute due to Lambda pause
+    if (
+      queue.length >= table.mode ||
+      (botPoolConfig.autoMatchStealthBots && LUDO_BOTS_ENABLED && waitDurationMs >= autoMatchWaitSec)
+    ) {
+      clearQueueTimer(tableId);
+      autoFillQueueWithStealthBots(tableId);
+      for (const [mId, m] of activeMatches.entries()) {
+        if (
+          (m.status === 'starting' || m.status === 'in_progress') &&
+          m.players.some((p) => p.userId === userId)
+        ) {
+          return res.json({
+            inMatch: true,
+            matchId: mId,
+            match: m,
+          });
+        }
+      }
+    }
+  }
 
   return res.json({
     inMatch: false,
     inQueue: pos !== -1,
     queuePosition: pos + 1,
     waitingCount: queue.length,
-    needed: cashTables.find((t) => t.id === tableId)?.mode || 2,
+    needed: table.mode,
   });
 });
 
-// 6. Get Authoritative Match State
-ludoRouter.get('/match/:matchId/state', (req: Request, res: Response) => {
+// 6. Get Authoritative Match State (Supports cross-lambda cache reconstruction via Supabase)
+ludoRouter.get('/match/:matchId/state', async (req: Request, res: Response) => {
   const { matchId } = req.params;
-  const match = activeMatches.get(matchId);
+  let match = activeMatches.get(matchId);
+
+  // If match not in memory, query Supabase across serverless instances
+  if (!match && isSupabaseConfigured && supabase) {
+    try {
+      const { data: dbMatch } = await supabase
+        .from('ludo_table_matches')
+        .select('*')
+        .eq('id', matchId)
+        .maybeSingle();
+
+      if (dbMatch) {
+        match = buildMatchFromDb(dbMatch);
+        activeMatches.set(matchId, match);
+      }
+    } catch (err) {
+      console.warn('[LudoMatchServer] Supabase match fetch error:', err);
+    }
+  }
 
   if (!match) {
     // Check completed history
@@ -1102,6 +1573,7 @@ ludoRouter.get('/match/:matchId/state', (req: Request, res: Response) => {
           advanceMatchTurn(match, false);
           checkAndRunBotTurn(match);
         }
+        syncMatchToSupabase(match);
       }
     }
   }
@@ -1167,6 +1639,7 @@ ludoRouter.post('/match/:matchId/roll', (req: Request, res: Response) => {
 
   // Reset deadline for token move
   match.turnDeadline = new Date(Date.now() + adminConfig.turnTimeoutSeconds * 1000).toISOString();
+  syncMatchToSupabase(match);
 
   return res.json({
     success: true,
@@ -1209,6 +1682,7 @@ ludoRouter.post('/match/:matchId/move', (req: Request, res: Response) => {
 
   // Trigger bot if next turn is simulated
   checkAndRunBotTurn(match);
+  syncMatchToSupabase(match);
 
   return res.json({
     success: true,
@@ -1293,6 +1767,7 @@ ludoRouter.post('/match/:matchId/leave', (req: Request, res: Response) => {
     }
   }
 
+  syncMatchToSupabase(match);
   return res.json({ success: true, match });
 });
 
@@ -1327,6 +1802,7 @@ ludoRouter.post('/match/:matchId/chat', (req: Request, res: Response) => {
   if (match.chatMessages.length > 30) {
     match.chatMessages.shift();
   }
+  syncMatchToSupabase(match);
 
   // If match has simulated / bot opponents, trigger a realistic friendly quick response
   const botOpponents = match.players.filter(

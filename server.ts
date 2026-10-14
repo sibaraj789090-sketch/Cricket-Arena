@@ -32,12 +32,34 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Support pre-parsed bodies from serverless platforms (e.g. Vercel)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (typeof req.body === 'string' && req.body.trim().startsWith('{')) {
+    try {
+      req.body = JSON.parse(req.body);
+      (req as any)._body = true;
+    } catch {}
+  } else if (Buffer.isBuffer(req.body)) {
+    try {
+      req.body = JSON.parse(req.body.toString('utf8'));
+      (req as any)._body = true;
+    } catch {}
+  } else if (req.body && typeof req.body === 'object') {
+    (req as any)._body = true;
+  }
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Normalize request URL for Vercel edge/serverless rewrites
 app.use((req: Request, res: Response, next: NextFunction) => {
-  const queryParam = req.query?.__path || (req.query as any)?.[0] || req.query?.path;
+  const queryParam =
+    req.query?.__path ||
+    (req.query as any)?.[0] ||
+    req.query?.path ||
+    (req.query as any)?.all;
   const queryPath = Array.isArray(queryParam) ? queryParam.join('/') : (queryParam as string | undefined);
 
   const matchedPath =
@@ -45,11 +67,17 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     (req.headers['x-vercel-matched-path'] as string) ||
     (req as any).originalUrl;
 
+  let targetPath = '';
   if (queryPath) {
     const cleanSubPath = queryPath.replace(/^\/+/, '');
-    req.url = cleanSubPath.startsWith('api/') ? `/${cleanSubPath}` : `/api/${cleanSubPath}`;
-  } else if (matchedPath && matchedPath.startsWith('/api') && (req.url === '/api' || req.url === '/' || !req.url.startsWith('/api/'))) {
-    req.url = matchedPath;
+    targetPath = cleanSubPath.startsWith('api/') ? `/${cleanSubPath}` : `/api/${cleanSubPath}`;
+  } else if (
+    matchedPath &&
+    matchedPath.startsWith('/api') &&
+    !matchedPath.includes('[...') &&
+    (req.url === '/api' || req.url === '/' || !req.url.startsWith('/api/'))
+  ) {
+    targetPath = matchedPath;
   } else if (req.url && !req.url.startsWith('/api')) {
     if (
       req.url.startsWith('/wallet/') ||
@@ -59,9 +87,24 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       req.url.startsWith('/teams/') ||
       req.url.startsWith('/health')
     ) {
-      req.url = `/api${req.url}`;
+      targetPath = `/api${req.url}`;
+    } else {
+      targetPath = req.url;
     }
+  } else {
+    targetPath = req.url;
   }
+
+  // Preserve query string when reconstructing req.url
+  const queryEntries = Object.entries(req.query || {}).filter(
+    ([k]) => k !== '__path' && k !== 'path' && k !== 'all' && k !== '0'
+  );
+  const rawPath = targetPath.split('?')[0];
+  const queryString = queryEntries.length > 0
+    ? '?' + new URLSearchParams(queryEntries.map(([k, v]) => [k, String(Array.isArray(v) ? v[0] : (typeof v === 'object' && v ? JSON.stringify(v) : v ?? ''))])).toString()
+    : (targetPath.includes('?') ? '?' + targetPath.split('?')[1] : '');
+
+  req.url = `${rawPath}${queryString}`;
   next();
 });
 
@@ -1538,11 +1581,11 @@ async function startServer() {
 }
 
 // In standard dev or full-stack production, start the standalone HTTP server.
-// In Vercel serverless environment, the app instance is exported for function routing.
-if (!process.env.VERCEL) {
+// In Vercel / serverless environment, the app instance is exported for function routing.
+const isServerless = Boolean(process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME);
+if (!isServerless && process.env.NODE_ENV !== 'test') {
   startServer().catch((err) => {
     console.error('Failed to start server:', err);
-    process.exit(1);
   });
 }
 

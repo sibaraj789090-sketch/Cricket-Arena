@@ -220,10 +220,13 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
       });
 
       let data: any = null;
+      let rawResponseText = '';
       try {
-        const text = await res.text();
-        data = text ? JSON.parse(text) : null;
-      } catch {}
+        rawResponseText = await res.text();
+        data = rawResponseText ? JSON.parse(rawResponseText) : null;
+      } catch {
+        // Raw text was not JSON
+      }
 
       if (!res.ok || !data || !data.success) {
         // Refund on server failure using authoritative server action
@@ -235,7 +238,25 @@ export const LudoCashLobbyView: React.FC<LudoCashLobbyViewProps> = ({
         });
         await refreshWallet();
         setIsJoining(false);
-        setQueueError(data?.error || 'Failed to join table queue.');
+
+        let errorMsg = data?.error;
+        if (!errorMsg) {
+          if (rawResponseText && (rawResponseText.includes('<!doctype') || rawResponseText.includes('<html'))) {
+            errorMsg = 'Matchmaking API route returned HTML. Please ensure Vercel serverless functions are deployed.';
+          } else if (res.status === 404) {
+            errorMsg = 'Matchmaking endpoint not found (404). Please check deployment routing.';
+          } else if (res.status === 500) {
+            errorMsg = 'Server internal error during matchmaking (500). Please try again shortly.';
+          } else if (res.status === 504 || res.status === 502) {
+            errorMsg = 'Server gateway timeout (504). Please try again.';
+          } else if (rawResponseText && rawResponseText.length < 150) {
+            errorMsg = `Server error (${res.status}): ${rawResponseText}`;
+          } else {
+            errorMsg = `Failed to join table queue (HTTP ${res.status}).`;
+          }
+        }
+
+        setQueueError(errorMsg);
         setTableToConfirm(null);
         return;
       }
